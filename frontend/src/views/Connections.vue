@@ -5,32 +5,24 @@
         <h2>数据库连接</h2>
         <div class="muted">平台可部署在任意机器。配置好连接后，备份文件写在 SQL Server 所在服务器上，不会写到本平台。</div>
       </div>
-      <div style="display:flex;gap:8px">
+      <div class="head-actions">
         <el-button v-if="admin" @click="openRemoteDlg">远程备份配置</el-button>
         <el-button v-if="admin" type="primary" @click="openEdit()">新增连接</el-button>
       </div>
     </div>
-    <el-table :data="items" stripe v-loading="loading" class="nowrap-table" table-layout="auto" empty-text="暂无连接">
-      <el-table-column prop="name" label="名称" min-width="140" show-overflow-tooltip />
-      <el-table-column prop="db_type" label="类型" width="110" />
-      <el-table-column label="地址" min-width="170" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.host }}:{{ row.port }}</template>
+    <el-table :data="items" stripe v-loading="loading" class="fit-table" table-layout="fixed" empty-text="暂无连接">
+      <el-table-column prop="name" label="名称" show-overflow-tooltip />
+      <el-table-column label="地址" width="168" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.host }}:{{ row.port }} · {{ modeMap[row.connect_mode] || row.connect_mode }}</template>
       </el-table-column>
-      <el-table-column label="数据库" min-width="180" show-overflow-tooltip>
+      <el-table-column label="数据库" show-overflow-tooltip>
         <template #default="{ row }">{{ row.database_label || dbLabel(row.database) }}</template>
       </el-table-column>
-      <el-table-column prop="username" label="用户名" width="110" show-overflow-tooltip />
-      <el-table-column label="连接方式" width="110">
-        <template #default="{ row }">{{ modeMap[row.connect_mode] || row.connect_mode }}</template>
+      <el-table-column prop="backup_dir" label="备份目录" width="108" show-overflow-tooltip />
+      <el-table-column label="群晖" width="56">
+        <template #default="{ row }">{{ row.remote_enabled ? "是" : "否" }}</template>
       </el-table-column>
-      <el-table-column prop="backup_dir" label="服务器备份目录" min-width="180" show-overflow-tooltip />
-      <el-table-column label="远程备份" min-width="140" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.remote_enabled ? (row.remote_target_name || "已开启") : "否" }}</template>
-      </el-table-column>
-      <el-table-column label="创建时间" width="170">
-        <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
-      </el-table-column>
-      <el-table-column label="备份进度" width="220">
+      <el-table-column label="进度" width="140">
         <template #default="{ row }">
           <div
             v-if="backupStates[row.id]"
@@ -44,11 +36,13 @@
           <span v-else class="muted">—</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="220" fixed="right">
+      <el-table-column label="操作" :width="admin ? 168 : 88">
         <template #default="{ row }">
-          <el-button text type="success" :disabled="backupStates[row.id]?.status === 'running'" @click="openRun(row)">立即备份</el-button>
-          <el-button v-if="admin" text @click="openEdit(row)">编辑</el-button>
-          <el-button v-if="admin" text type="danger" @click="remove(row)">删除</el-button>
+          <div class="ops-cell">
+            <el-button text type="success" :disabled="backupStates[row.id]?.status === 'running'" @click="openRun(row)">备份</el-button>
+            <el-button v-if="admin" text @click="openEdit(row)">编辑</el-button>
+            <el-button v-if="admin" text type="danger" @click="remove(row)">删除</el-button>
+          </div>
         </template>
       </el-table-column>
     </el-table>
@@ -150,22 +144,24 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="remoteDlg" title="远程备份配置（群晖）" width="760px" :close-on-click-modal="false">
+    <el-dialog v-model="remoteDlg" title="远程备份配置（群晖）" width="720px" :close-on-click-modal="false">
       <div class="page-head" style="margin-bottom:12px">
         <div class="muted">配置群晖地址、账号、密码和远程目录。连接里勾选「是否远程备份」后即可选用。</div>
         <el-button type="primary" @click="openRemoteEdit()">新增群晖</el-button>
       </div>
-      <el-table :data="remotes" stripe>
-        <el-table-column prop="name" label="名称" min-width="120" />
-        <el-table-column label="地址" min-width="160">
+      <el-table :data="remotes" stripe class="fit-table" table-layout="fixed">
+        <el-table-column prop="name" label="名称" show-overflow-tooltip />
+        <el-table-column label="地址" width="150" show-overflow-tooltip>
           <template #default="{ row }">{{ row.host }}:{{ row.port }}</template>
         </el-table-column>
-        <el-table-column prop="username" label="账号" width="110" />
-        <el-table-column prop="remote_dir" label="远程目录" min-width="140" show-overflow-tooltip />
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column prop="username" label="账号" width="90" show-overflow-tooltip />
+        <el-table-column prop="remote_dir" label="远程目录" show-overflow-tooltip />
+        <el-table-column label="操作" width="112">
           <template #default="{ row }">
-            <el-button text @click="openRemoteEdit(row)">编辑</el-button>
-            <el-button text type="danger" @click="removeRemote(row)">删除</el-button>
+            <div class="ops-cell">
+              <el-button text @click="openRemoteEdit(row)">编辑</el-button>
+              <el-button text type="danger" @click="removeRemote(row)">删除</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -202,7 +198,7 @@
 import { onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import http, { errMsg } from "../api";
-import { dbLabel, fmtTime, isAdmin, modeMap } from "../format";
+import { dbLabel, isAdmin, modeMap } from "../format";
 
 const admin = isAdmin();
 const loading = ref(false);

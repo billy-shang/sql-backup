@@ -5,49 +5,54 @@
         <h2>备份文件与历史</h2>
         <div class="muted">路径是数据库服务器上的路径，在「备份目录\库名\日期\」子目录中，不是 D:\TEST 根目录。</div>
       </div>
-      <div style="display:flex;gap:8px">
-        <el-select v-model="filters.connection_id" clearable placeholder="全部连接" style="width:220px" @change="load">
-          <el-option v-for="c in conns" :key="c.id" :label="connOptionLabel(c)" :value="c.id" />
-        </el-select>
-        <el-select v-model="filters.status" clearable placeholder="全部状态" style="width:140px" @change="load">
-          <el-option label="成功" value="success" />
-          <el-option label="失败" value="failed" />
-          <el-option label="运行中" value="running" />
-        </el-select>
-        <el-input v-model="filters.q" placeholder="搜索库名/路径" clearable style="width:180px" @keyup.enter="load" @clear="load" />
-        <el-button @click="load">刷新</el-button>
-      </div>
+        <div class="head-actions">
+          <el-select v-model="filters.connection_id" clearable placeholder="全部连接" style="width:180px" @change="load">
+            <el-option v-for="c in conns" :key="c.id" :label="connOptionLabel(c)" :value="c.id" />
+          </el-select>
+          <el-select v-model="filters.status" clearable placeholder="全部状态" style="width:120px" @change="load">
+            <el-option label="成功" value="success" />
+            <el-option label="失败" value="failed" />
+            <el-option label="运行中" value="running" />
+          </el-select>
+          <el-input v-model="filters.q" placeholder="搜索库名/路径" clearable style="width:160px" @keyup.enter="load" @clear="load" />
+          <el-button @click="load">刷新</el-button>
+        </div>
     </div>
-    <el-table :data="items" stripe v-loading="loading" class="wrap-table" empty-text="暂无备份记录">
-      <el-table-column prop="connection_name" label="数据库连接" min-width="140" />
-      <el-table-column prop="database" label="库名" min-width="110" />
-      <el-table-column label="备份时间" width="170">
-        <template #default="{ row }">{{ fmtTime(row.started_at) }}</template>
+    <el-table :data="items" stripe v-loading="loading" class="fit-table" table-layout="fixed" empty-text="暂无备份记录">
+      <el-table-column prop="connection_name" label="连接" show-overflow-tooltip />
+      <el-table-column prop="database" label="库名" width="100" show-overflow-tooltip />
+      <el-table-column label="时间" width="136">
+        <template #default="{ row }">{{ fmtTimeShort(row.started_at) }}</template>
       </el-table-column>
-      <el-table-column label="类型" width="90">
+      <el-table-column label="类型" width="56">
         <template #default="{ row }">{{ typeMap[row.backup_type] || row.backup_type }}</template>
       </el-table-column>
-      <el-table-column label="大小" width="110">
+      <el-table-column label="大小" width="72">
         <template #default="{ row }">{{ fmtSize(row.file_size) }}</template>
       </el-table-column>
-      <el-table-column label="状态" width="100">
+      <el-table-column label="状态" width="64">
         <template #default="{ row }">
-          <el-tag :type="statusType(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
+          <el-tag :type="statusType(row.status)" size="small" :title="row.error_message || ''">{{ statusText(row.status) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="file_path" label="路径" min-width="240" />
-      <el-table-column label="群晖" min-width="180">
+      <el-table-column label="路径" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span :title="row.file_path">{{ fileBaseName(row.file_path) || "—" }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="群晖" show-overflow-tooltip>
         <template #default="{ row }">
           <span v-if="row.remote_status === 'success'" :title="row.remote_path">{{ remoteFileName(row) }}</span>
           <span v-else-if="row.remote_status === 'failed'" style="color:#dc2626" :title="row.remote_error">{{ row.remote_error || "上传失败" }}</span>
           <span v-else>—</span>
         </template>
       </el-table-column>
-      <el-table-column prop="error_message" label="失败原因" min-width="180" />
-      <el-table-column label="操作" width="160" fixed="right">
+      <el-table-column label="操作" :width="admin ? 112 : 64">
         <template #default="{ row }">
-          <el-button text type="primary" :disabled="!row.downloadable" @click="download(row)">下载</el-button>
-          <el-button v-if="admin" text type="danger" @click="remove(row)">删除</el-button>
+          <div class="ops-cell">
+            <el-button text type="primary" :disabled="!row.downloadable" @click="download(row)">下载</el-button>
+            <el-button v-if="admin" text type="danger" @click="remove(row)">删除</el-button>
+          </div>
         </template>
       </el-table-column>
     </el-table>
@@ -58,7 +63,7 @@
 import { onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import http, { errMsg } from "../api";
-import { connOptionLabel, fmtSize, fmtTime, isAdmin, statusText, statusType, typeMap } from "../format";
+import { connOptionLabel, fileBaseName, fmtSize, fmtTimeShort, isAdmin, statusText, statusType, typeMap } from "../format";
 
 const admin = isAdmin();
 const loading = ref(false);
@@ -79,9 +84,7 @@ async function load() {
 }
 
 function remoteFileName(row) {
-  const p = String(row.remote_path || "").replace(/\\/g, "/");
-  const name = p.split("/").filter(Boolean).pop();
-  return name || "已上传";
+  return fileBaseName(row.remote_path) || "已上传";
 }
 
 async function download(row) {

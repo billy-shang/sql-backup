@@ -1,6 +1,7 @@
 html, body, #app {
   margin: 0;
   height: 100%;
+  overflow-x: hidden;
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   background: #f4f6fb;
   color: #1f2937;
@@ -12,13 +13,28 @@ a { color: inherit; }
   border-radius: 12px;
   padding: 16px 18px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 .page-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.page-head > div:first-child {
+  min-width: 0;
+  flex: 1 1 280px;
+}
+.head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  flex: 0 1 auto;
 }
 .page-head h2 {
   margin: 0;
@@ -26,20 +42,40 @@ a { color: inherit; }
   font-weight: 650;
 }
 .muted { color: #909399; font-size: 13px; }
-.nowrap-table :deep(.el-table__cell .cell) {
+.fit-table {
+  width: 100% !important;
+}
+.fit-table :deep(.el-table__header-wrapper),
+.fit-table :deep(.el-table__body-wrapper),
+.fit-table :deep(.el-table__footer-wrapper) {
+  overflow-x: hidden !important;
+}
+.fit-table :deep(.el-scrollbar__bar.is-horizontal) {
+  display: none !important;
+}
+.fit-table :deep(.el-table__cell .cell) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   word-break: keep-all;
 }
-.wrap-table :deep(.el-table__cell .cell) {
-  white-space: normal;
-  word-break: break-all;
-  line-height: 1.55;
+.ops-cell {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  white-space: nowrap;
+}
+.ops-cell :deep(.el-button) {
+  margin-left: 0;
+  margin-right: 0;
+  padding: 0 6px;
+}
+.ops-cell :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -48,6 +84,7 @@ a { color: inherit; }
   border: 1px solid #ebeef5;
   border-radius: 12px;
   padding: 16px 18px;
+  min-width: 0;
 }
 .stat-item .n {
   font-size: 28px;
@@ -55,3 +92,7 @@ a { color: inherit; }
   color: #2563eb;
 }
 .stat-item .l { color: #6b7280; margin-top: 4px; font-size: 13px; }
+
+.el-dialog {
+  max-width: calc(100vw - 32px);
+}

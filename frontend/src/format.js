@@ -19,6 +19,16 @@ export function fmtTime(v) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+export function fmtTimeShort(v) {
+  const s = fmtTime(v);
+  return s.length >= 19 ? s.slice(0, 16) : s;
+}
+
+export function fileBaseName(path) {
+  const p = String(path || "").replace(/\\/g, "/");
+  return p.split("/").filter(Boolean).pop() || "";
+}
+
 export function fmtSize(n) {
   const x = Number(n) || 0;
   if (x <= 0) return "-";

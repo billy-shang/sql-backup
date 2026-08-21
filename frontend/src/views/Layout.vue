@@ -1,7 +1,7 @@
 <template>
   <div class="app-shell">
     <el-container class="layout">
-      <el-aside width="220px" class="aside">
+      <el-aside width="200px" class="aside">
       <div class="brand">
         <span class="brand-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -238,7 +238,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
 }
-.layout { flex: 1; min-height: 0; }
+.layout { flex: 1; min-height: 0; overflow: hidden; }
 .content-shell { min-width: 0; }
 .aside {
   display: flex;
@@ -336,7 +336,7 @@ onBeforeUnmount(() => {
 .uname { font-weight: 650; font-size: 14px; color: #1f2329; }
 .role { font-size: 12px; color: #8a8f99; }
 .chev { color: #c0c4cc; font-size: 12px; }
-.main { padding: 16px 18px 24px; background: #f5f7fa; }
+.main { padding: 16px 18px 24px; background: #f5f7fa; overflow-x: hidden; min-width: 0; }
 .app-footer {
   flex: 0 0 34px;
   min-height: 34px;

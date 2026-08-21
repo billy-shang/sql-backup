@@ -10,27 +10,27 @@
     <div class="page-card">
       <div class="page-head">
         <h2>最近备份</h2>
-        <div style="display:flex;gap:8px">
+        <div class="head-actions">
           <el-button type="danger" plain @click="clearLogs">清空日志</el-button>
           <el-button @click="load">刷新</el-button>
         </div>
       </div>
-      <el-table :data="recent" stripe empty-text="暂无备份记录">
-        <el-table-column prop="name" label="连接名称" min-width="140" />
-        <el-table-column prop="database" label="数据库" min-width="100" />
-        <el-table-column prop="backup_type" label="类型" width="100">
+      <el-table :data="recent" stripe class="fit-table" table-layout="fixed" empty-text="暂无备份记录">
+        <el-table-column prop="name" label="连接" show-overflow-tooltip />
+        <el-table-column prop="database" label="数据库" show-overflow-tooltip />
+        <el-table-column prop="backup_type" label="类型" width="56">
           <template #default="{ row }">{{ typeMap[row.backup_type] || row.backup_type }}</template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="100">
+        <el-table-column prop="status" label="状态" width="72">
           <template #default="{ row }">
             <el-tag :type="statusType(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="file_size" label="大小" width="110">
+        <el-table-column prop="file_size" label="大小" width="78">
           <template #default="{ row }">{{ fmtSize(row.file_size) }}</template>
         </el-table-column>
-        <el-table-column prop="started_at" label="时间" min-width="170">
-          <template #default="{ row }">{{ fmtTime(row.started_at) }}</template>
+        <el-table-column prop="started_at" label="时间" width="136">
+          <template #default="{ row }">{{ fmtTimeShort(row.started_at) }}</template>
         </el-table-column>
       </el-table>
     </div>
@@ -41,7 +41,7 @@
 import { onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import http, { errMsg } from "../api";
-import { fmtSize, fmtTime, statusText, statusType, typeMap } from "../format";
+import { fmtSize, fmtTimeShort, statusText, statusType, typeMap } from "../format";
 
 const stats = reactive({ connections: 0, schedules: 0, success: 0, failed: 0, running: 0 });
 const recent = ref([]);

@@ -7,34 +7,32 @@
       </div>
       <el-button v-if="admin" type="primary" @click="openEdit()">新增任务</el-button>
     </div>
-    <el-table :data="items" stripe v-loading="loading" class="nowrap-table" table-layout="auto" empty-text="暂无定时任务">
-      <el-table-column prop="name" label="任务名称" min-width="140" show-overflow-tooltip />
-      <el-table-column prop="connection_name" label="数据库" min-width="140" show-overflow-tooltip />
-      <el-table-column label="周期" min-width="150" show-overflow-tooltip>
+    <el-table :data="items" stripe v-loading="loading" class="fit-table" table-layout="fixed" empty-text="暂无定时任务">
+      <el-table-column prop="name" label="任务" show-overflow-tooltip />
+      <el-table-column prop="connection_name" label="连接" show-overflow-tooltip />
+      <el-table-column label="周期" width="128" show-overflow-tooltip>
         <template #default="{ row }">{{ cycleText(row) }}</template>
       </el-table-column>
-      <el-table-column label="备份类型" width="100">
+      <el-table-column label="类型" width="56">
         <template #default="{ row }">{{ typeMap[row.backup_type] }}</template>
       </el-table-column>
-      <el-table-column prop="retain_days" label="保留天数" width="90" />
-      <el-table-column label="压缩" width="70">
-        <template #default="{ row }">{{ row.compress ? "是" : "否" }}</template>
-      </el-table-column>
-      <el-table-column label="状态" width="100">
+      <el-table-column prop="retain_days" label="保留" width="56" />
+      <el-table-column label="状态" width="72">
         <template #default="{ row }">
-          <el-tag :type="statusType(row.last_status)" size="small">{{ statusText(row.last_status) || (row.enabled ? "待运行" : "暂停") }}</el-tag>
+          <el-tag :type="statusType(row.last_status)" size="small" :title="row.last_error || ''">{{ statusText(row.last_status) || (row.enabled ? "待运行" : "暂停") }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="上次运行" width="170">
-        <template #default="{ row }">{{ fmtTime(row.last_run_at) }}</template>
+      <el-table-column label="上次运行" width="136">
+        <template #default="{ row }">{{ fmtTimeShort(row.last_run_at) }}</template>
       </el-table-column>
-      <el-table-column prop="last_error" label="失败原因" min-width="180" show-overflow-tooltip />
-      <el-table-column v-if="admin" label="操作" width="240" fixed="right">
+      <el-table-column v-if="admin" label="操作" width="156">
         <template #default="{ row }">
-          <el-button v-if="row.enabled" text @click="pause(row)">暂停</el-button>
-          <el-button v-else text type="success" @click="resume(row)">恢复</el-button>
-          <el-button text @click="openEdit(row)">编辑</el-button>
-          <el-button text type="danger" @click="remove(row)">删除</el-button>
+          <div class="ops-cell">
+            <el-button v-if="row.enabled" text @click="pause(row)">暂停</el-button>
+            <el-button v-else text type="success" @click="resume(row)">恢复</el-button>
+            <el-button text @click="openEdit(row)">编辑</el-button>
+            <el-button text type="danger" @click="remove(row)">删除</el-button>
+          </div>
         </template>
       </el-table-column>
     </el-table>
@@ -89,7 +87,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import http, { errMsg } from "../api";
-import { connOptionLabel, fmtTime, isAdmin, schedMap, statusText, statusType, typeMap, weekMap } from "../format";
+import { connOptionLabel, fmtTime, fmtTimeShort, isAdmin, schedMap, statusText, statusType, typeMap, weekMap } from "../format";
 
 const admin = isAdmin();
 const loading = ref(false);

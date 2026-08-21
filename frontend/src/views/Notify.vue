@@ -1,12 +1,12 @@
 <template>
-  <div class="page-card" style="max-width:820px">
+  <div class="page-card">
     <div class="page-head">
       <div>
         <h2>通知管理</h2>
         <div class="muted">备份完成后，可向飞书、企业微信、钉钉推送结果，可单选或同时启用</div>
       </div>
     </div>
-    <el-form :model="form" label-width="140px" style="max-width:740px">
+    <el-form :model="form" label-width="120px" class="notify-form">
       <el-form-item label="启用通知">
         <el-switch v-model="form.enabled" :disabled="!admin" />
       </el-form-item>
@@ -124,3 +124,12 @@ async function save() {
 
 onMounted(load);
 </script>
+
+<style scoped>
+.notify-form { max-width: 720px; }
+.notify-form :deep(.el-checkbox-group) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+</style>
