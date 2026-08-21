@@ -105,6 +105,8 @@ class NotifyConfig(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     feishu_webhook: Mapped[str] = mapped_column(String(1024), nullable=False, default="")
+    wecom_webhook: Mapped[str] = mapped_column(String(1024), nullable=False, default="")
+    notify_channel: Mapped[str] = mapped_column(String(16), nullable=False, default="feishu")
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     notify_on_success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     notify_on_fail: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

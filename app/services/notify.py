@@ -1,4 +1,4 @@
-"""飞书自定义机器人通知（卡片：成功绿色 / 失败红色）。"""
+"""飞书与企业微信自定义机器人通知。"""
 from __future__ import annotations
 
 import logging
@@ -131,6 +131,62 @@ def send_feishu(webhook: str, payload: dict[str, Any]) -> None:
         log.warning("[notify] 飞书发送失败: %s", e)
 
 
+def build_wecom_markdown(
+    *,
+    ok: bool,
+    conn_name: str,
+    host: str,
+    port: int,
+    database: str,
+    when: str,
+    file_path: str = "",
+    size: int = 0,
+    error: str = "",
+) -> str:
+    """构建企业微信群机器人 Markdown 消息。"""
+    status = '<font color="info">备份成功</font>' if ok else '<font color="warning">备份失败</font>'
+    lines = [
+        f"### {'✅' if ok else '❌'} SQL Server {status}",
+        f"> 数据名称：{_plain(conn_name)}",
+        f"> 数据地址：{_plain(f'{host}:{int(port)}' if host else '—')}",
+        f"> 数据库：{_plain(database)}",
+        f"> 时间：{_plain(when)}",
+        f"> 备份路径：{_plain(file_path)}",
+    ]
+    if ok and size:
+        lines.append(f"> 文件大小：{format_size(size)}")
+    if not ok:
+        lines.append(f"> 失败原因：<font color=\"warning\">{_plain(error or '未知错误')}</font>")
+    return "\n".join(lines)
+
+
+def send_wecom(webhook: str, content: str) -> None:
+    """发送企业微信群机器人 Markdown 消息。"""
+    url = (webhook or "").strip()
+    if not url:
+        log.info("[notify] 未配置企微 Webhook，跳过")
+        return
+    try:
+        resp = httpx.post(
+            url,
+            json={"msgtype": "markdown", "markdown": {"content": content}},
+            timeout=12.0,
+        )
+        log.info("[notify] 企微 HTTP %s", resp.status_code)
+        body = (resp.text or "")[:400]
+        if resp.status_code >= 400:
+            log.warning("[notify] 企微返回: %s", body)
+            return
+        try:
+            data = resp.json()
+        except Exception:  # noqa: BLE001
+            data = {}
+        if int(data.get("errcode", 0) or 0) != 0:
+            log.warning("[notify] 企微业务失败: %s", body)
+    except Exception as e:  # noqa: BLE001
+        log.warning("[notify] 企微发送失败: %s", e)
+
+
 def notify_backup_result(
     db: Session,
     *,
@@ -151,16 +207,23 @@ def notify_backup_result(
         return
     if not ok and not cfg.notify_on_fail:
         return
-    card = build_backup_card(
-        ok=ok,
-        conn_name=conn_name,
-        host=host,
-        port=port,
-        database=database,
-        when=when,
-        file_path=file_path,
-        size=size,
-        error=error,
-    )
-    log.info("[notify] 发送飞书卡片 ok=%s db=%s conn=%s", ok, database, conn_name)
-    send_feishu(cfg.feishu_webhook, {"msg_type": "interactive", "card": card})
+    channel = getattr(cfg, "notify_channel", "feishu") or "feishu"
+    common = {
+        "ok": ok,
+        "conn_name": conn_name,
+        "host": host,
+        "port": port,
+        "database": database,
+        "when": when,
+        "file_path": file_path,
+        "size": size,
+        "error": error,
+    }
+    if channel in ("feishu", "both"):
+        card = build_backup_card(**common)
+        log.info("[notify] 发送飞书卡片 ok=%s db=%s conn=%s", ok, database, conn_name)
+        send_feishu(cfg.feishu_webhook, {"msg_type": "interactive", "card": card})
+    if channel in ("wecom", "both"):
+        content = build_wecom_markdown(**common)
+        log.info("[notify] 发送企微消息 ok=%s db=%s conn=%s", ok, database, conn_name)
+        send_wecom(getattr(cfg, "wecom_webhook", ""), content)

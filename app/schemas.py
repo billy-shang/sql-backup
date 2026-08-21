@@ -160,6 +160,8 @@ class BackupOut(BaseModel):
 
 class NotifyIn(BaseModel):
     feishu_webhook: str = Field(default="", max_length=1024)
+    wecom_webhook: str = Field(default="", max_length=1024)
+    notify_channel: Literal["feishu", "wecom", "both"] = "feishu"
     enabled: bool = False
     notify_on_success: bool = True
     notify_on_fail: bool = True
@@ -167,6 +169,8 @@ class NotifyIn(BaseModel):
 
 class NotifyOut(BaseModel):
     feishu_webhook: str = ""
+    wecom_webhook: str = ""
+    notify_channel: str = "feishu"
     enabled: bool = False
     notify_on_success: bool = True
     notify_on_fail: bool = True

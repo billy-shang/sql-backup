@@ -19,6 +19,8 @@ def get_cfg(_user: CurrentUser, db: DbSess) -> dict:
 def put_cfg(_admin: AdminUser, body: NotifyIn, db: DbSess) -> dict:
     row = get_notify(db)
     row.feishu_webhook = (body.feishu_webhook or "").strip()
+    row.wecom_webhook = (body.wecom_webhook or "").strip()
+    row.notify_channel = body.notify_channel
     row.enabled = bool(body.enabled)
     row.notify_on_success = bool(body.notify_on_success)
     row.notify_on_fail = bool(body.notify_on_fail)

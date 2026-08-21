@@ -1,6 +1,7 @@
 <template>
-  <el-container class="layout">
-    <el-aside width="220px" class="aside">
+  <div class="app-shell">
+    <el-container class="layout">
+      <el-aside width="220px" class="aside">
       <div class="brand">
         <span class="brand-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -28,7 +29,7 @@
         </el-menu-item>
         <el-menu-item index="/notify">
           <el-icon><Bell /></el-icon>
-          <span>飞书通知</span>
+          <span>通知管理</span>
         </el-menu-item>
         <el-menu-item v-if="isAdmin" index="/users">
           <el-icon><User /></el-icon>
@@ -36,19 +37,23 @@
         </el-menu-item>
       </el-menu>
       <div class="aside-foot">
-        <div class="ver">v{{ appVersion }}</div>
         <button type="button" class="logout-btn" @click="logout">
           <el-icon><SwitchButton /></el-icon>
           <span>退出</span>
         </button>
       </div>
-    </el-aside>
+      </el-aside>
 
-    <el-container>
-      <el-header class="header">
+      <el-container class="content-shell">
+        <el-header class="header">
         <div class="title">{{ title }}</div>
-        <el-dropdown trigger="click" @command="onUserCommand">
-          <button type="button" class="user-btn">
+        <el-dropdown
+          trigger="click"
+          popper-class="user-menu-popper"
+          @command="onUserCommand"
+          @visible-change="onUserMenuVisible"
+        >
+          <button ref="userBtnRef" type="button" class="user-btn">
             <span class="uname">{{ user.username || "未登录" }}</span>
             <span class="role">{{ isAdmin ? "管理员" : "普通运维" }}</span>
             <el-icon class="chev"><ArrowDown /></el-icon>
@@ -63,15 +68,25 @@
                 <el-icon><QuestionFilled /></el-icon>
                 帮助
               </el-dropdown-item>
+              <el-dropdown-item command="logout" divided>
+                <el-icon><SwitchButton /></el-icon>
+                退出
+              </el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
-      </el-header>
-      <el-main class="main">
-        <router-view />
-      </el-main>
+        </el-header>
+        <el-main class="main">
+          <router-view />
+        </el-main>
+      </el-container>
     </el-container>
-  </el-container>
+    <footer class="app-footer">
+      <span>SQL Backup v{{ appVersion }}</span>
+      <span class="footer-separator">·</span>
+      <a :href="githubUrl" target="_blank" rel="noopener noreferrer">GitHub 项目地址</a>
+    </footer>
+  </div>
 
   <el-dialog v-model="pwdVisible" title="修改密码" width="420px">
     <el-form label-width="90px">
@@ -120,7 +135,7 @@
         <ul>
           <li>完整 / 差异 / 日志备份；差异需已有完整备份</li>
           <li>定时：每天、每周或指定时间；暂停后不再触发</li>
-          <li>飞书：填机器人 Webhook，成功绿卡、失败红卡</li>
+          <li>通知：可选择飞书、企业微信或同时启用，填写对应机器人 Webhook</li>
         </ul>
       </section>
     </div>
@@ -131,15 +146,16 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from "vue";
+import { computed, nextTick, onMounted, onBeforeUnmount, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import http, { errMsg } from "../api";
-import { APP_VERSION } from "../version";
+import { APP_VERSION, GITHUB_URL } from "../version";
 
 const route = useRoute();
 const router = useRouter();
 const appVersion = APP_VERSION;
+const githubUrl = GITHUB_URL;
 const user = JSON.parse(localStorage.getItem("sqlbackup-user") || '{"username":"","role":""}');
 const isAdmin = computed(() => user.role === "admin");
 
@@ -148,7 +164,7 @@ const titles = {
   "/connections": "数据库连接",
   "/backups": "备份文件",
   "/schedules": "定时任务",
-  "/notify": "飞书通知",
+  "/notify": "通知管理",
   "/users": "用户管理",
 };
 const title = computed(() => titles[route.path] || "SQL Backup");
@@ -157,10 +173,27 @@ const pwdVisible = ref(false);
 const helpVisible = ref(false);
 const pwdLoading = ref(false);
 const pwd = reactive({ old_password: "", new_password: "" });
+const userBtnRef = ref(null);
+const userMenuWidth = ref(0);
+
+function syncUserMenuWidth() {
+  const w = userBtnRef.value?.offsetWidth || 0;
+  if (!w) return;
+  userMenuWidth.value = w;
+  document.querySelectorAll(".user-menu-popper").forEach((el) => {
+    el.style.width = `${w}px`;
+    el.style.minWidth = `${w}px`;
+  });
+}
+
+function onUserMenuVisible(visible) {
+  if (visible) nextTick(syncUserMenuWidth);
+}
 
 function onUserCommand(cmd) {
   if (cmd === "pwd") openPwd();
   if (cmd === "help") helpVisible.value = true;
+  if (cmd === "logout") logout();
 }
 
 function openPwd() {
@@ -187,10 +220,26 @@ function logout() {
   localStorage.removeItem("sqlbackup-user");
   router.push("/login");
 }
+
+onMounted(() => {
+  nextTick(syncUserMenuWidth);
+  window.addEventListener("resize", syncUserMenuWidth);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("resize", syncUserMenuWidth);
+});
 </script>
 
 <style scoped>
-.layout { height: 100%; }
+.app-shell {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.layout { flex: 1; min-height: 0; }
+.content-shell { min-width: 0; }
 .aside {
   display: flex;
   flex-direction: column;
@@ -243,12 +292,6 @@ function logout() {
   padding: 10px 10px 14px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
-.ver {
-  padding: 0 16px 8px;
-  font-size: 12px;
-  color: #64748b;
-  letter-spacing: 0.02em;
-}
 .logout-btn {
   width: 100%;
   height: 42px;
@@ -294,6 +337,26 @@ function logout() {
 .role { font-size: 12px; color: #8a8f99; }
 .chev { color: #c0c4cc; font-size: 12px; }
 .main { padding: 16px 18px 24px; background: #f5f7fa; }
+.app-footer {
+  flex: 0 0 34px;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  color: #7b8492;
+  font-size: 12px;
+  background: #fff;
+  border-top: 1px solid #e9edf2;
+  box-sizing: border-box;
+}
+.app-footer a {
+  color: #409eff;
+  text-decoration: none;
+}
+.app-footer a:hover { text-decoration: underline; }
+.footer-separator { color: #c7ccd4; }
 .help-body { max-height: 62vh; overflow: auto; padding-right: 8px; color: #4e5969; font-size: 14px; line-height: 1.7; }
 .help-body h3 { margin: 0 0 8px; font-size: 15px; color: #1f2329; }
 .help-body section + section { margin-top: 18px; }
@@ -308,4 +371,20 @@ function logout() {
 }
 .help-body code { padding: 1px 6px; }
 .help-body pre { margin: 8px 0; padding: 10px 12px; color: #334155; white-space: pre-wrap; }
+</style>
+
+<style>
+.user-menu-popper {
+  min-width: 0 !important;
+  box-sizing: border-box;
+}
+.user-menu-popper .el-dropdown-menu {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 6px 0;
+}
+.user-menu-popper .el-dropdown-menu__item {
+  justify-content: flex-start;
+}
 </style>

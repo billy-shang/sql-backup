@@ -10,7 +10,13 @@
           <el-button v-if="admin" type="primary" @click="openEdit()">新增连接</el-button>
         </div>
     </div>
-    <el-table :data="items" stripe v-loading="loading">
+    <el-table
+      :data="items"
+      stripe
+      v-loading="loading"
+      :row-class-name="backupRowClass"
+      :row-style="backupRowStyle"
+    >
       <el-table-column prop="name" label="名称" min-width="140" />
       <el-table-column prop="db_type" label="类型" width="110" />
       <el-table-column label="地址" min-width="170">
@@ -30,16 +36,37 @@
       <el-table-column label="创建时间" width="170">
         <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
       </el-table-column>
+      <el-table-column label="备份进度" width="150" fixed="right">
+        <template #default="{ row }">
+          <div v-if="backupStates[row.id]" class="backup-progress">
+            <el-progress
+              :percentage="backupStates[row.id].percent"
+              :stroke-width="9"
+              :show-text="false"
+              :color="backupStates[row.id].status === 'failed' ? '#f56c6c' : '#36b37e'"
+            />
+            <span :class="{ failed: backupStates[row.id].status === 'failed' }">
+              {{ progressText(backupStates[row.id]) }}
+            </span>
+          </div>
+          <span v-else class="muted">—</span>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="220" fixed="right">
         <template #default="{ row }">
-          <el-button text type="success" @click="openRun(row)">立即备份</el-button>
+          <el-button text type="success" :disabled="!!backupStates[row.id]" @click="openRun(row)">立即备份</el-button>
           <el-button v-if="admin" text @click="openEdit(row)">编辑</el-button>
           <el-button v-if="admin" text type="danger" @click="remove(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dlg" :title="form.id ? '编辑连接' : '新增连接'" width="720px">
+    <el-dialog
+      v-model="dlg"
+      :title="form.id ? '编辑连接' : '新增连接'"
+      width="720px"
+      :close-on-click-modal="false"
+    >
       <el-form :model="form" label-width="110px">
         <el-form-item label="名称"><el-input v-model="form.name" placeholder="生产SQLServer" /></el-form-item>
         <el-form-item label="数据库类型">
@@ -177,7 +204,7 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from "vue";
+import { onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import http, { errMsg } from "../api";
 import { dbLabel, fmtTime, isAdmin, modeMap } from "../format";
@@ -201,6 +228,8 @@ const remoteEditDlg = ref(false);
 const remoteSaving = ref(false);
 const remoteTesting = ref(false);
 const remoteForm = reactive(emptyRemote());
+const backupStates = reactive({});
+const backupTimers = new Map();
 
 function emptyRemote() {
   return {
@@ -394,16 +423,66 @@ function openRun(row) {
 }
 
 async function doRun() {
+  const cid = runCid.value;
+  if (!cid || backupStates[cid]) return;
+  const payload = { ...runForm };
+  runDlg.value = false;
   running.value = true;
+  startProgress(cid);
   try {
-    const { data } = await http.post(`/backups/run/${runCid.value}`, runForm);
-    ElMessageBox.alert(data.message || "备份完成", "备份已写入数据库服务器", { type: "success" });
-    runDlg.value = false;
+    const { data } = await http.post(`/backups/run/${cid}`, payload);
+    finishProgress(cid, "success");
+    ElMessage.success(data.message || "备份完成");
   } catch (e) {
+    finishProgress(cid, "failed");
     ElMessage.error(errMsg(e));
   } finally {
     running.value = false;
   }
+}
+
+function startProgress(cid) {
+  backupStates[cid] = { percent: 6, status: "running" };
+  const timer = window.setInterval(() => {
+    const state = backupStates[cid];
+    if (!state || state.status !== "running") return;
+    const step = state.percent < 55 ? 4 : state.percent < 80 ? 2 : 1;
+    state.percent = Math.min(92, state.percent + step);
+  }, 900);
+  backupTimers.set(cid, timer);
+}
+
+function finishProgress(cid, status) {
+  const timer = backupTimers.get(cid);
+  if (timer) window.clearInterval(timer);
+  backupTimers.delete(cid);
+  const state = backupStates[cid];
+  if (!state) return;
+  state.status = status;
+  if (status === "success") state.percent = 100;
+  window.setTimeout(() => {
+    delete backupStates[cid];
+  }, status === "success" ? 3500 : 6000);
+}
+
+function progressText(state) {
+  if (state.status === "success") return "已完成 100%";
+  if (state.status === "failed") return "备份失败";
+  return `备份中 ${state.percent}%`;
+}
+
+function backupRowClass({ row }) {
+  return backupStates[row.id] ? "backup-row-active" : "";
+}
+
+function backupRowStyle({ row }) {
+  const state = backupStates[row.id];
+  if (!state) return {};
+  const color = state.status === "failed" ? "245, 108, 108" : "54, 179, 126";
+  return {
+    background: `rgba(${color}, 0.12)`,
+    transition: "background 0.3s ease",
+  };
 }
 
 async function loadRemotes() {
@@ -488,6 +567,11 @@ onMounted(() => {
   load();
   loadRemotes();
 });
+
+onBeforeUnmount(() => {
+  backupTimers.forEach((timer) => window.clearInterval(timer));
+  backupTimers.clear();
+});
 </script>
 
 <style scoped>
@@ -535,5 +619,26 @@ onMounted(() => {
 .sys-tag {
   margin-left: 4px;
   flex-shrink: 0;
+}
+.backup-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.backup-progress :deep(.el-progress-bar__outer) {
+  background: rgba(54, 179, 126, 0.16);
+}
+.backup-progress :deep(.el-progress-bar__inner) {
+  opacity: 0.78;
+  transition: width 0.8s ease;
+}
+.backup-progress span {
+  color: #268c65;
+  font-size: 12px;
+  line-height: 1;
+}
+.backup-progress span.failed { color: #d94b4b; }
+.page-card :deep(.el-table__row.backup-row-active > .el-table__cell) {
+  background-color: transparent !important;
 }
 </style>
