@@ -5,12 +5,12 @@
         <h2>数据库连接</h2>
         <div class="muted">平台可部署在任意机器。配置好连接后，备份文件写在 SQL Server 所在服务器上，不会写到本平台。</div>
       </div>
-        <div style="display:flex;gap:8px">
-          <el-button v-if="admin" @click="openRemoteDlg">远程备份配置</el-button>
-          <el-button v-if="admin" type="primary" @click="openEdit()">新增连接</el-button>
-        </div>
+      <div style="display:flex;gap:8px">
+        <el-button v-if="admin" @click="openRemoteDlg">远程备份配置</el-button>
+        <el-button v-if="admin" type="primary" @click="openEdit()">新增连接</el-button>
+      </div>
     </div>
-    <el-table :data="items" stripe v-loading="loading" class="nowrap-table" table-layout="auto">
+    <el-table :data="items" stripe v-loading="loading" class="nowrap-table" table-layout="auto" empty-text="暂无连接">
       <el-table-column prop="name" label="名称" min-width="140" show-overflow-tooltip />
       <el-table-column prop="db_type" label="类型" width="110" />
       <el-table-column label="地址" min-width="170" show-overflow-tooltip>
@@ -32,7 +32,12 @@
       </el-table-column>
       <el-table-column label="备份进度" width="220">
         <template #default="{ row }">
-          <div v-if="backupStates[row.id]" class="prog-bar" :class="backupStates[row.id].status">
+          <div
+            v-if="backupStates[row.id]"
+            class="prog-bar"
+            :class="backupStates[row.id].status"
+            :title="backupStates[row.id].message || progressText(backupStates[row.id])"
+          >
             <div class="prog-fill" :style="{ width: backupStates[row.id].percent + '%' }"></div>
             <span class="prog-text">{{ progressText(backupStates[row.id]) }}</span>
           </div>
@@ -126,7 +131,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="runDlg" title="立即备份" width="460px">
+    <el-dialog v-model="runDlg" title="立即备份" width="460px" :close-on-click-modal="false">
       <el-form label-width="100px">
         <el-form-item label="备份类型">
           <el-select v-model="runForm.backup_type" style="width:100%">
@@ -145,7 +150,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="remoteDlg" title="远程备份配置（群晖）" width="760px">
+    <el-dialog v-model="remoteDlg" title="远程备份配置（群晖）" width="760px" :close-on-click-modal="false">
       <div class="page-head" style="margin-bottom:12px">
         <div class="muted">配置群晖地址、账号、密码和远程目录。连接里勾选「是否远程备份」后即可选用。</div>
         <el-button type="primary" @click="openRemoteEdit()">新增群晖</el-button>
@@ -166,12 +171,15 @@
       </el-table>
     </el-dialog>
 
-    <el-dialog v-model="remoteEditDlg" :title="remoteForm.id ? '编辑群晖' : '新增群晖'" width="560px">
+    <el-dialog v-model="remoteEditDlg" :title="remoteForm.id ? '编辑群晖' : '新增群晖'" width="560px" :close-on-click-modal="false">
       <el-form :model="remoteForm" label-width="110px">
         <el-form-item label="名称"><el-input v-model="remoteForm.name" placeholder="办公室群晖" /></el-form-item>
         <el-form-item label="地址"><el-input v-model="remoteForm.host" placeholder="192.168.1.5" /></el-form-item>
         <el-form-item label="端口"><el-input-number v-model="remoteForm.port" :min="1" :max="65535" /></el-form-item>
-        <el-form-item label="HTTPS"><el-switch v-model="remoteForm.https" /></el-form-item>
+        <el-form-item label="HTTPS">
+          <el-switch v-model="remoteForm.https" @change="onRemoteHttpsChange" />
+          <span class="muted" style="margin-left:10px">HTTP 一般 5000，HTTPS 一般 5001</span>
+        </el-form-item>
         <el-form-item label="账号"><el-input v-model="remoteForm.username" /></el-form-item>
         <el-form-item label="密码">
           <el-input v-model="remoteForm.password" type="password" show-password :placeholder="remoteForm.id ? '留空则使用已保存密码' : '必填'" />
@@ -359,6 +367,10 @@ async function probe() {
 }
 
 async function save() {
+  if (form.remote_enabled && !form.remote_target_id) {
+    ElMessage.warning("已开启远程备份，请选择群晖配置");
+    return;
+  }
   saving.value = true;
   try {
     const payload = { ...form, database: databasePayload() };
@@ -464,9 +476,8 @@ function pollProgress(cid) {
       const { data } = await http.get(`/backups/progress/${cid}`);
       if (!data.item) return;
       applyJob(data.item, true);
-    } catch (e) {
-      stopTimer(cid);
-      finishProgress(cid, "failed", errMsg(e));
+    } catch {
+      /* 备份线程仍在跑时瞬时 500 不要当成失败，下一轮继续问 */
     }
   };
   tick();
@@ -527,6 +538,11 @@ function openRemoteDlg() {
 function openRemoteEdit(row) {
   Object.assign(remoteForm, emptyRemote(), row || {}, { password: "" });
   remoteEditDlg.value = true;
+}
+
+function onRemoteHttpsChange(on) {
+  if (on && Number(remoteForm.port) === 5000) remoteForm.port = 5001;
+  if (!on && Number(remoteForm.port) === 5001) remoteForm.port = 5000;
 }
 
 async function probeRemote() {
@@ -650,7 +666,7 @@ onBeforeUnmount(() => {
   position: relative;
   height: 22px;
   border-radius: 11px;
-  background: #edf2f0;
+  background: #eef8f1;
   overflow: hidden;
 }
 .prog-fill {
@@ -658,7 +674,7 @@ onBeforeUnmount(() => {
   left: 0;
   top: 0;
   bottom: 0;
-  background: linear-gradient(90deg, #5ee0a0, #1f9d64);
+  background: linear-gradient(90deg, #d8f6e2, #a8e6be);
   border-radius: 11px;
   transition: width 0.45s ease;
 }
@@ -671,17 +687,17 @@ onBeforeUnmount(() => {
   text-align: center;
   font-size: 12px;
   font-weight: 650;
-  color: #16382a;
+  color: #2f6b45;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   padding: 0 8px;
 }
 .prog-bar.failed .prog-fill {
-  background: linear-gradient(90deg, #f7a3a3, #e85d5d);
+  background: linear-gradient(90deg, #fde2e2, #f5b4b4);
 }
-.prog-bar.failed .prog-text { color: #7a1d1d; }
+.prog-bar.failed .prog-text { color: #9b2c2c; }
 .prog-bar.success .prog-fill {
-  background: linear-gradient(90deg, #5ee0a0, #1f9d64);
+  background: linear-gradient(90deg, #c8efd4, #8ed9a8);
 }
 </style>

@@ -7,7 +7,7 @@
       </div>
       <el-button v-if="admin" type="primary" @click="openEdit()">新增任务</el-button>
     </div>
-    <el-table :data="items" stripe v-loading="loading" class="nowrap-table" table-layout="auto">
+    <el-table :data="items" stripe v-loading="loading" class="nowrap-table" table-layout="auto" empty-text="暂无定时任务">
       <el-table-column prop="name" label="任务名称" min-width="140" show-overflow-tooltip />
       <el-table-column prop="connection_name" label="数据库" min-width="140" show-overflow-tooltip />
       <el-table-column label="周期" min-width="150" show-overflow-tooltip>
@@ -39,12 +39,12 @@
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dlg" :title="form.id ? '编辑任务' : '新增任务'" width="560px">
+    <el-dialog v-model="dlg" :title="form.id ? '编辑任务' : '新增任务'" width="560px" :close-on-click-modal="false">
       <el-form :model="form" label-width="110px">
         <el-form-item label="任务名称"><el-input v-model="form.name" /></el-form-item>
         <el-form-item label="数据库">
           <el-select v-model="form.connection_id" style="width:100%">
-            <el-option v-for="c in conns" :key="c.id" :label="`${c.name} / ${c.database}`" :value="c.id" />
+            <el-option v-for="c in conns" :key="c.id" :label="connOptionLabel(c)" :value="c.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="周期">
@@ -89,7 +89,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import http, { errMsg } from "../api";
-import { fmtTime, isAdmin, schedMap, statusText, statusType, typeMap, weekMap } from "../format";
+import { connOptionLabel, fmtTime, isAdmin, schedMap, statusText, statusType, typeMap, weekMap } from "../format";
 
 const admin = isAdmin();
 const loading = ref(false);
@@ -173,22 +173,34 @@ async function save() {
 }
 
 async function pause(row) {
-  await http.post(`/schedules/${row.id}/pause`);
-  ElMessage.success("已暂停");
-  load();
+  try {
+    await http.post(`/schedules/${row.id}/pause`);
+    ElMessage.success("已暂停");
+    load();
+  } catch (e) {
+    ElMessage.error(errMsg(e));
+  }
 }
 
 async function resume(row) {
-  await http.post(`/schedules/${row.id}/resume`);
-  ElMessage.success("已恢复");
-  load();
+  try {
+    await http.post(`/schedules/${row.id}/resume`);
+    ElMessage.success("已恢复");
+    load();
+  } catch (e) {
+    ElMessage.error(errMsg(e));
+  }
 }
 
 async function remove(row) {
   await ElMessageBox.confirm(`删除任务「${row.name}」？`, "删除", { type: "warning" });
-  await http.delete(`/schedules/${row.id}`);
-  ElMessage.success("已删除");
-  load();
+  try {
+    await http.delete(`/schedules/${row.id}`);
+    ElMessage.success("已删除");
+    load();
+  } catch (e) {
+    ElMessage.error(errMsg(e));
+  }
 }
 
 onMounted(async () => {

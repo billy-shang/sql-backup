@@ -6,19 +6,19 @@
         <div class="muted">路径是数据库服务器上的路径，在「备份目录\库名\日期\」子目录中，不是 D:\TEST 根目录。</div>
       </div>
       <div style="display:flex;gap:8px">
-        <el-select v-model="filters.connection_id" clearable placeholder="全部数据库" style="width:180px" @change="load">
-          <el-option v-for="c in conns" :key="c.id" :label="`${c.name} / ${c.database}`" :value="c.id" />
+        <el-select v-model="filters.connection_id" clearable placeholder="全部连接" style="width:220px" @change="load">
+          <el-option v-for="c in conns" :key="c.id" :label="connOptionLabel(c)" :value="c.id" />
         </el-select>
         <el-select v-model="filters.status" clearable placeholder="全部状态" style="width:140px" @change="load">
           <el-option label="成功" value="success" />
           <el-option label="失败" value="failed" />
           <el-option label="运行中" value="running" />
         </el-select>
-        <el-input v-model="filters.q" placeholder="搜索" clearable style="width:180px" @keyup.enter="load" />
+        <el-input v-model="filters.q" placeholder="搜索库名/路径" clearable style="width:180px" @keyup.enter="load" @clear="load" />
         <el-button @click="load">刷新</el-button>
       </div>
     </div>
-    <el-table :data="items" stripe v-loading="loading" class="wrap-table">
+    <el-table :data="items" stripe v-loading="loading" class="wrap-table" empty-text="暂无备份记录">
       <el-table-column prop="connection_name" label="数据库连接" min-width="140" />
       <el-table-column prop="database" label="库名" min-width="110" />
       <el-table-column label="备份时间" width="170">
@@ -38,8 +38,8 @@
       <el-table-column prop="file_path" label="路径" min-width="240" />
       <el-table-column label="群晖" min-width="180">
         <template #default="{ row }">
-          <span v-if="row.remote_status === 'success'">{{ row.remote_path || "已上传" }}</span>
-          <span v-else-if="row.remote_status === 'failed'" style="color:#dc2626">{{ row.remote_error || "上传失败" }}</span>
+          <span v-if="row.remote_status === 'success'" :title="row.remote_path">{{ remoteFileName(row) }}</span>
+          <span v-else-if="row.remote_status === 'failed'" style="color:#dc2626" :title="row.remote_error">{{ row.remote_error || "上传失败" }}</span>
           <span v-else>—</span>
         </template>
       </el-table-column>
@@ -58,7 +58,7 @@
 import { onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import http, { errMsg } from "../api";
-import { fmtSize, fmtTime, isAdmin, statusText, statusType, typeMap } from "../format";
+import { connOptionLabel, fmtSize, fmtTime, isAdmin, statusText, statusType, typeMap } from "../format";
 
 const admin = isAdmin();
 const loading = ref(false);
@@ -76,6 +76,12 @@ async function load() {
   } finally {
     loading.value = false;
   }
+}
+
+function remoteFileName(row) {
+  const p = String(row.remote_path || "").replace(/\\/g, "/");
+  const name = p.split("/").filter(Boolean).pop();
+  return name || "已上传";
 }
 
 async function download(row) {

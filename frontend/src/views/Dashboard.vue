@@ -15,7 +15,7 @@
           <el-button @click="load">刷新</el-button>
         </div>
       </div>
-      <el-table :data="recent" stripe>
+      <el-table :data="recent" stripe empty-text="暂无备份记录">
         <el-table-column prop="name" label="连接名称" min-width="140" />
         <el-table-column prop="database" label="数据库" min-width="100" />
         <el-table-column prop="backup_type" label="类型" width="100">

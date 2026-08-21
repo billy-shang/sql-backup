@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from app.db import SessionLocal
-from app.deps import AdminUser, CurrentUser, DbSess
+from app.deps import CurrentUser, DbSess, TokenUser
 from app.models import BackupRecord, DbConnection
 from app.schemas import BackupOut, BackupRunIn
 from app.services import progress as prog
@@ -132,12 +132,12 @@ def run_now(cid: int, body: BackupRunIn, _user: CurrentUser, db: DbSess) -> dict
 
 
 @router.get("/progress")
-def backup_progress_all(_user: CurrentUser) -> dict:
+def backup_progress_all(_user: TokenUser) -> dict:
     return {"ok": True, "items": prog.list_jobs()}
 
 
 @router.get("/progress/{cid}")
-def backup_progress(cid: int, _user: CurrentUser) -> dict:
+def backup_progress(cid: int, _user: TokenUser) -> dict:
     item = prog.get_job(cid)
     return {"ok": True, "item": item}
 

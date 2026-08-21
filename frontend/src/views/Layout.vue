@@ -88,7 +88,7 @@
     </footer>
   </div>
 
-  <el-dialog v-model="pwdVisible" title="修改密码" width="420px">
+  <el-dialog v-model="pwdVisible" title="修改密码" width="420px" :close-on-click-modal="false">
     <el-form label-width="90px">
       <el-form-item label="原密码">
         <el-input v-model="pwd.old_password" type="password" show-password />

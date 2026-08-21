@@ -32,6 +32,13 @@ def _safe_folder(name: str) -> str:
     return s.strip(" .")
 
 
+def _file_basename(path: str) -> str:
+    """Windows 路径在 Linux 容器里 Path.name 会整段当文件名，必须先把反斜杠换成 /。"""
+    s = str(path or "").replace("\\", "/").rstrip("/")
+    name = s.split("/")[-1].strip() if s else ""
+    return name or "backup.bak"
+
+
 def probe_remote_target(
     host: str,
     port: int,
@@ -52,7 +59,7 @@ def upload_backup_to_remote(db: Session, conn_row: DbConnection, rec: Any) -> st
     password = decrypt_secret(target.password_enc)
     if not password:
         raise RuntimeError("群晖密码为空，请重新保存远程备份配置")
-    filename = Path(rec.file_path or rec.local_path or "backup.bak").name
+    filename = _file_basename(rec.file_path or rec.local_path or "backup.bak")
     day = ""
     src_path = rec.file_path or rec.local_path or ""
     parts = src_path.replace("/", "\\").split("\\")
@@ -66,7 +73,19 @@ def upload_backup_to_remote(db: Session, conn_row: DbConnection, rec: Any) -> st
     if day:
         dest_parts.append(day)
     dest_subdir = "/".join(dest_parts)
-    log.info("[remote] 群晖目标目录 %s/%s", target.remote_dir.rstrip("/"), dest_subdir)
+    syno = {
+        "host": target.host,
+        "port": int(target.port or 5001),
+        "username": target.username,
+        "password": password,
+        "https": bool(target.https),
+        "remote_dir": target.remote_dir,
+    }
+    log.info("[remote] 群晖目标目录 %s/%s", syno["remote_dir"].rstrip("/"), dest_subdir)
+    try:
+        db.commit()
+    except Exception:  # noqa: BLE001
+        db.rollback()
     staged: Path | None = None
     local = _existing_local(rec)
     try:
@@ -79,12 +98,12 @@ def upload_backup_to_remote(db: Session, conn_row: DbConnection, rec: Any) -> st
                 "请确认平台能访问该备份盘，且群晖 File Station（HTTP 5000 / HTTPS 5001）网络互通。"
             )
         remote = upload_to_synology(
-            host=target.host,
-            port=int(target.port or 5001),
-            username=target.username,
-            password=password,
-            https=bool(target.https),
-            remote_dir=target.remote_dir,
+            host=syno["host"],
+            port=syno["port"],
+            username=syno["username"],
+            password=syno["password"],
+            https=syno["https"],
+            remote_dir=syno["remote_dir"],
             local_file=local,
             dest_subdir=dest_subdir,
             filename=filename,
@@ -110,7 +129,7 @@ def _stage_remote_file(conn_row: DbConnection, rec: Any) -> Path | None:
     src = (rec.file_path or "").strip()
     if not src:
         return None
-    tmp = Path(tempfile.mkdtemp(prefix="sqlbak_")) / Path(src.replace("\\", "/")).name
+    tmp = Path(tempfile.mkdtemp(prefix="sqlbak_")) / _file_basename(src)
     tmp.parent.mkdir(parents=True, exist_ok=True)
     mode = (conn_row.connect_mode or "direct").lower()
     if mode == "ssh" and not _is_windows_path(src):

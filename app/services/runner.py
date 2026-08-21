@@ -43,8 +43,8 @@ def _backup_one(
     )
     db.add(rec)
     db.commit()
-    db.refresh(rec)
-    log.info("[runner] 备份开始 id=%s conn=%s db=%s type=%s", rec.id, conn.id, dbname, backup_type)
+    rec_id = rec.id
+    log.info("[runner] 备份开始 id=%s conn=%s db=%s type=%s", rec_id, conn.id, dbname, backup_type)
     when = rec.started_at.strftime("%Y-%m-%d %H:%M")
     try:
         result = run_backup(

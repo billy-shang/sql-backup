@@ -275,6 +275,13 @@ def notify_backup_result(
     if not ok and not cfg.notify_on_fail:
         return
     channels = enabled_channels(cfg)
+    feishu_hook = cfg.feishu_webhook
+    wecom_hook = getattr(cfg, "wecom_webhook", "") or ""
+    dingtalk_hook = getattr(cfg, "dingtalk_webhook", "") or ""
+    try:
+        db.commit()
+    except Exception:  # noqa: BLE001
+        db.rollback()
     common = {
         "ok": ok,
         "conn_name": conn_name,
@@ -289,12 +296,12 @@ def notify_backup_result(
     if "feishu" in channels:
         card = build_backup_card(**common)
         log.info("[notify] 发送飞书卡片 ok=%s db=%s conn=%s", ok, database, conn_name)
-        send_feishu(cfg.feishu_webhook, {"msg_type": "interactive", "card": card})
+        send_feishu(feishu_hook, {"msg_type": "interactive", "card": card})
     if "wecom" in channels:
         content = build_wecom_markdown(**common)
         log.info("[notify] 发送企微消息 ok=%s db=%s conn=%s", ok, database, conn_name)
-        send_wecom(getattr(cfg, "wecom_webhook", ""), content)
+        send_wecom(wecom_hook, content)
     if "dingtalk" in channels:
         title, text = build_dingtalk_markdown(**common)
         log.info("[notify] 发送钉钉消息 ok=%s db=%s conn=%s", ok, database, conn_name)
-        send_dingtalk(getattr(cfg, "dingtalk_webhook", ""), title, text)
+        send_dingtalk(dingtalk_hook, title, text)

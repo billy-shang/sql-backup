@@ -41,6 +41,12 @@ export function dbLabel(raw) {
   return names.length ? names.join("、") : "全部用户数据库";
 }
 
+export function connOptionLabel(c) {
+  const db = (c && (c.database_label || dbLabel(c.database))) || "全部用户数据库";
+  const name = (c && c.name) || "未命名";
+  return db.length > 28 ? `${name}（${db.slice(0, 26)}…）` : `${name}（${db}）`;
+}
+
 export function isAdmin() {
   try {
     return JSON.parse(localStorage.getItem("sqlbackup-user") || "{}").role === "admin";
