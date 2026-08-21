@@ -1,4 +1,4 @@
-"""飞书与企业微信自定义机器人通知。"""
+"""飞书、企业微信、钉钉自定义机器人通知。"""
 from __future__ import annotations
 
 import logging
@@ -160,6 +160,17 @@ def build_wecom_markdown(
     return "\n".join(lines)
 
 
+def enabled_channels(cfg: NotifyConfig) -> set[str]:
+    raw = (getattr(cfg, "notify_channel", "") or "feishu").strip().lower()
+    if raw == "both":
+        return {"feishu", "wecom"}
+    if raw in {"all", "feishu,wecom,dingtalk"}:
+        return {"feishu", "wecom", "dingtalk"}
+    allowed = {"feishu", "wecom", "dingtalk"}
+    parts = {p.strip() for p in raw.replace(";", ",").split(",") if p.strip() in allowed}
+    return parts or {"feishu"}
+
+
 def send_wecom(webhook: str, content: str) -> None:
     """发送企业微信群机器人 Markdown 消息。"""
     url = (webhook or "").strip()
@@ -187,6 +198,62 @@ def send_wecom(webhook: str, content: str) -> None:
         log.warning("[notify] 企微发送失败: %s", e)
 
 
+def build_dingtalk_markdown(
+    *,
+    ok: bool,
+    conn_name: str,
+    host: str,
+    port: int,
+    database: str,
+    when: str,
+    file_path: str = "",
+    size: int = 0,
+    error: str = "",
+) -> tuple[str, str]:
+    """构建钉钉群机器人 Markdown：title + text。"""
+    title = "SQL Server 备份成功" if ok else "SQL Server 备份失败"
+    lines = [
+        f"### {'✅' if ok else '❌'} {title}",
+        f"- 数据名称：{_plain(conn_name)}",
+        f"- 数据地址：{_plain(f'{host}:{int(port)}' if host else '—')}",
+        f"- 数据库：{_plain(database)}",
+        f"- 时间：{_plain(when)}",
+        f"- 备份路径：{_plain(file_path)}",
+    ]
+    if ok and size:
+        lines.append(f"- 文件大小：{format_size(size)}")
+    if not ok:
+        lines.append(f"- 失败原因：{_plain(error or '未知错误')}")
+    return title, "\n".join(lines)
+
+
+def send_dingtalk(webhook: str, title: str, text: str) -> None:
+    """发送钉钉自定义机器人 Markdown 消息。"""
+    url = (webhook or "").strip()
+    if not url:
+        log.info("[notify] 未配置钉钉 Webhook，跳过")
+        return
+    try:
+        resp = httpx.post(
+            url,
+            json={"msgtype": "markdown", "markdown": {"title": title, "text": text}},
+            timeout=12.0,
+        )
+        log.info("[notify] 钉钉 HTTP %s", resp.status_code)
+        body = (resp.text or "")[:400]
+        if resp.status_code >= 400:
+            log.warning("[notify] 钉钉返回: %s", body)
+            return
+        try:
+            data = resp.json()
+        except Exception:  # noqa: BLE001
+            data = {}
+        if int(data.get("errcode", 0) or 0) != 0:
+            log.warning("[notify] 钉钉业务失败: %s", body)
+    except Exception as e:  # noqa: BLE001
+        log.warning("[notify] 钉钉发送失败: %s", e)
+
+
 def notify_backup_result(
     db: Session,
     *,
@@ -207,7 +274,7 @@ def notify_backup_result(
         return
     if not ok and not cfg.notify_on_fail:
         return
-    channel = getattr(cfg, "notify_channel", "feishu") or "feishu"
+    channels = enabled_channels(cfg)
     common = {
         "ok": ok,
         "conn_name": conn_name,
@@ -219,11 +286,15 @@ def notify_backup_result(
         "size": size,
         "error": error,
     }
-    if channel in ("feishu", "both"):
+    if "feishu" in channels:
         card = build_backup_card(**common)
         log.info("[notify] 发送飞书卡片 ok=%s db=%s conn=%s", ok, database, conn_name)
         send_feishu(cfg.feishu_webhook, {"msg_type": "interactive", "card": card})
-    if channel in ("wecom", "both"):
+    if "wecom" in channels:
         content = build_wecom_markdown(**common)
         log.info("[notify] 发送企微消息 ok=%s db=%s conn=%s", ok, database, conn_name)
         send_wecom(getattr(cfg, "wecom_webhook", ""), content)
+    if "dingtalk" in channels:
+        title, text = build_dingtalk_markdown(**common)
+        log.info("[notify] 发送钉钉消息 ok=%s db=%s conn=%s", ok, database, conn_name)
+        send_dingtalk(getattr(cfg, "dingtalk_webhook", ""), title, text)

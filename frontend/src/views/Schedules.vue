@@ -7,10 +7,10 @@
       </div>
       <el-button v-if="admin" type="primary" @click="openEdit()">新增任务</el-button>
     </div>
-    <el-table :data="items" stripe v-loading="loading">
-      <el-table-column prop="name" label="任务名称" min-width="140" />
-      <el-table-column prop="connection_name" label="数据库" min-width="140" />
-      <el-table-column label="周期" min-width="150">
+    <el-table :data="items" stripe v-loading="loading" class="nowrap-table" table-layout="auto">
+      <el-table-column prop="name" label="任务名称" min-width="140" show-overflow-tooltip />
+      <el-table-column prop="connection_name" label="数据库" min-width="140" show-overflow-tooltip />
+      <el-table-column label="周期" min-width="150" show-overflow-tooltip>
         <template #default="{ row }">{{ cycleText(row) }}</template>
       </el-table-column>
       <el-table-column label="备份类型" width="100">
@@ -28,7 +28,7 @@
       <el-table-column label="上次运行" width="170">
         <template #default="{ row }">{{ fmtTime(row.last_run_at) }}</template>
       </el-table-column>
-      <el-table-column prop="last_error" label="失败原因" min-width="160" show-overflow-tooltip />
+      <el-table-column prop="last_error" label="失败原因" min-width="180" show-overflow-tooltip />
       <el-table-column v-if="admin" label="操作" width="240" fixed="right">
         <template #default="{ row }">
           <el-button v-if="row.enabled" text @click="pause(row)">暂停</el-button>

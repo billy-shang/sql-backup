@@ -10,51 +10,38 @@
           <el-button v-if="admin" type="primary" @click="openEdit()">新增连接</el-button>
         </div>
     </div>
-    <el-table
-      :data="items"
-      stripe
-      v-loading="loading"
-      :row-class-name="backupRowClass"
-      :row-style="backupRowStyle"
-    >
-      <el-table-column prop="name" label="名称" min-width="140" />
+    <el-table :data="items" stripe v-loading="loading" class="nowrap-table" table-layout="auto">
+      <el-table-column prop="name" label="名称" min-width="140" show-overflow-tooltip />
       <el-table-column prop="db_type" label="类型" width="110" />
-      <el-table-column label="地址" min-width="170">
+      <el-table-column label="地址" min-width="170" show-overflow-tooltip>
         <template #default="{ row }">{{ row.host }}:{{ row.port }}</template>
       </el-table-column>
       <el-table-column label="数据库" min-width="180" show-overflow-tooltip>
         <template #default="{ row }">{{ row.database_label || dbLabel(row.database) }}</template>
       </el-table-column>
-      <el-table-column prop="username" label="用户名" width="110" />
+      <el-table-column prop="username" label="用户名" width="110" show-overflow-tooltip />
       <el-table-column label="连接方式" width="110">
         <template #default="{ row }">{{ modeMap[row.connect_mode] || row.connect_mode }}</template>
       </el-table-column>
-      <el-table-column prop="backup_dir" label="服务器备份目录" min-width="160" show-overflow-tooltip />
+      <el-table-column prop="backup_dir" label="服务器备份目录" min-width="180" show-overflow-tooltip />
       <el-table-column label="远程备份" min-width="140" show-overflow-tooltip>
         <template #default="{ row }">{{ row.remote_enabled ? (row.remote_target_name || "已开启") : "否" }}</template>
       </el-table-column>
       <el-table-column label="创建时间" width="170">
         <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="备份进度" width="150" fixed="right">
+      <el-table-column label="备份进度" width="220">
         <template #default="{ row }">
-          <div v-if="backupStates[row.id]" class="backup-progress">
-            <el-progress
-              :percentage="backupStates[row.id].percent"
-              :stroke-width="9"
-              :show-text="false"
-              :color="backupStates[row.id].status === 'failed' ? '#f56c6c' : '#36b37e'"
-            />
-            <span :class="{ failed: backupStates[row.id].status === 'failed' }">
-              {{ progressText(backupStates[row.id]) }}
-            </span>
+          <div v-if="backupStates[row.id]" class="prog-bar" :class="backupStates[row.id].status">
+            <div class="prog-fill" :style="{ width: backupStates[row.id].percent + '%' }"></div>
+            <span class="prog-text">{{ progressText(backupStates[row.id]) }}</span>
           </div>
           <span v-else class="muted">—</span>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="220" fixed="right">
         <template #default="{ row }">
-          <el-button text type="success" :disabled="!!backupStates[row.id]" @click="openRun(row)">立即备份</el-button>
+          <el-button text type="success" :disabled="backupStates[row.id]?.status === 'running'" @click="openRun(row)">立即备份</el-button>
           <el-button v-if="admin" text @click="openEdit(row)">编辑</el-button>
           <el-button v-if="admin" text type="danger" @click="remove(row)">删除</el-button>
         </template>
@@ -424,65 +411,88 @@ function openRun(row) {
 
 async function doRun() {
   const cid = runCid.value;
-  if (!cid || backupStates[cid]) return;
+  if (!cid || backupStates[cid]?.status === "running") return;
   const payload = { ...runForm };
   runDlg.value = false;
-  running.value = true;
+  running.value = false;
   startProgress(cid);
   try {
-    const { data } = await http.post(`/backups/run/${cid}`, payload);
-    finishProgress(cid, "success");
-    ElMessage.success(data.message || "备份完成");
+    await http.post(`/backups/run/${cid}`, payload);
+    pollProgress(cid);
   } catch (e) {
-    finishProgress(cid, "failed");
+    finishProgress(cid, "failed", errMsg(e));
     ElMessage.error(errMsg(e));
-  } finally {
-    running.value = false;
   }
 }
 
 function startProgress(cid) {
-  backupStates[cid] = { percent: 6, status: "running" };
-  const timer = window.setInterval(() => {
-    const state = backupStates[cid];
-    if (!state || state.status !== "running") return;
-    const step = state.percent < 55 ? 4 : state.percent < 80 ? 2 : 1;
-    state.percent = Math.min(92, state.percent + step);
-  }, 900);
-  backupTimers.set(cid, timer);
+  stopTimer(cid);
+  backupStates[cid] = {
+    percent: 1,
+    status: "running",
+    message: "正在准备备份",
+    current_db: "",
+    done: 0,
+    total: 1,
+  };
 }
 
-function finishProgress(cid, status) {
+function pollProgress(cid) {
+  stopTimer(cid);
+  const tick = async () => {
+    try {
+      const { data } = await http.get(`/backups/progress/${cid}`);
+      const item = data.item;
+      if (!item) return;
+      backupStates[cid] = {
+        percent: Number(item.percent) || 0,
+        status: item.status || "running",
+        message: item.message || "",
+        current_db: item.current_db || "",
+        done: item.done || 0,
+        total: item.total || 1,
+      };
+      if (item.status === "success") {
+        stopTimer(cid);
+        ElMessage.success(item.message || "备份完成");
+        window.setTimeout(() => delete backupStates[cid], 4000);
+      } else if (item.status === "failed") {
+        stopTimer(cid);
+        ElMessage.error(item.message || "备份失败");
+        window.setTimeout(() => delete backupStates[cid], 8000);
+      }
+    } catch (e) {
+      stopTimer(cid);
+      finishProgress(cid, "failed", errMsg(e));
+    }
+  };
+  tick();
+  backupTimers.set(cid, window.setInterval(tick, 800));
+}
+
+function stopTimer(cid) {
   const timer = backupTimers.get(cid);
   if (timer) window.clearInterval(timer);
   backupTimers.delete(cid);
-  const state = backupStates[cid];
-  if (!state) return;
+}
+
+function finishProgress(cid, status, message) {
+  stopTimer(cid);
+  const state = backupStates[cid] || { percent: 0 };
   state.status = status;
-  if (status === "success") state.percent = 100;
+  state.percent = status === "success" ? 100 : state.percent || 8;
+  state.message = message || (status === "success" ? "备份完成" : "备份失败");
+  backupStates[cid] = state;
   window.setTimeout(() => {
     delete backupStates[cid];
-  }, status === "success" ? 3500 : 6000);
+  }, status === "success" ? 4000 : 8000);
 }
 
 function progressText(state) {
   if (state.status === "success") return "已完成 100%";
   if (state.status === "failed") return "备份失败";
+  if (state.current_db) return `${state.current_db} ${state.percent}%`;
   return `备份中 ${state.percent}%`;
-}
-
-function backupRowClass({ row }) {
-  return backupStates[row.id] ? "backup-row-active" : "";
-}
-
-function backupRowStyle({ row }) {
-  const state = backupStates[row.id];
-  if (!state) return {};
-  const color = state.status === "failed" ? "245, 108, 108" : "54, 179, 126";
-  return {
-    background: `rgba(${color}, 0.12)`,
-    transition: "background 0.3s ease",
-  };
 }
 
 async function loadRemotes() {
@@ -620,25 +630,42 @@ onBeforeUnmount(() => {
   margin-left: 4px;
   flex-shrink: 0;
 }
-.backup-progress {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.prog-bar {
+  position: relative;
+  height: 22px;
+  border-radius: 11px;
+  background: #edf2f0;
+  overflow: hidden;
 }
-.backup-progress :deep(.el-progress-bar__outer) {
-  background: rgba(54, 179, 126, 0.16);
+.prog-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, #5ee0a0, #1f9d64);
+  border-radius: 11px;
+  transition: width 0.45s ease;
 }
-.backup-progress :deep(.el-progress-bar__inner) {
-  opacity: 0.78;
-  transition: width 0.8s ease;
-}
-.backup-progress span {
-  color: #268c65;
+.prog-text {
+  position: relative;
+  z-index: 1;
+  display: block;
+  height: 22px;
+  line-height: 22px;
+  text-align: center;
   font-size: 12px;
-  line-height: 1;
+  font-weight: 650;
+  color: #16382a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 8px;
 }
-.backup-progress span.failed { color: #d94b4b; }
-.page-card :deep(.el-table__row.backup-row-active > .el-table__cell) {
-  background-color: transparent !important;
+.prog-bar.failed .prog-fill {
+  background: linear-gradient(90deg, #f7a3a3, #e85d5d);
+}
+.prog-bar.failed .prog-text { color: #7a1d1d; }
+.prog-bar.success .prog-fill {
+  background: linear-gradient(90deg, #5ee0a0, #1f9d64);
 }
 </style>

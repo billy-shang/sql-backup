@@ -26,6 +26,12 @@ a { color: inherit; }
   font-weight: 650;
 }
 .muted { color: #909399; font-size: 13px; }
+.nowrap-table :deep(.el-table__cell .cell) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: keep-all;
+}
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

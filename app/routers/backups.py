@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import logging
 import os
+import threading
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
+from app.db import SessionLocal
 from app.deps import AdminUser, CurrentUser, DbSess
 from app.models import BackupRecord, DbConnection
 from app.schemas import BackupOut, BackupRunIn
+from app.services import progress as prog
 from app.services.runner import execute_backup
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/backups", tags=["backups"])
 
@@ -79,35 +85,56 @@ def list_backups(
     return {"ok": True, "items": items}
 
 
+def _run_manual_job(cid: int, body: BackupRunIn) -> None:
+    db = SessionLocal()
+    try:
+        recs = execute_backup(
+            db,
+            cid,
+            backup_type=body.backup_type,
+            compress=body.compress,
+            retain_days=body.retain_days,
+            delete_old=body.delete_old,
+            trigger="manual",
+        )
+        conn = db.query(DbConnection).filter(DbConnection.id == cid).one_or_none()
+        host = conn.host if conn else ""
+        if not recs:
+            prog.finish(cid, "failed", "没有可备份的数据库")
+            return
+        failed = [r for r in recs if r.status == "failed"]
+        ok_recs = [r for r in recs if r.status == "success"]
+        if not ok_recs:
+            prog.finish(cid, "failed", failed[0].error_message or "备份失败")
+            return
+        msg = f"已在数据库服务器 {host} 生成 {len(ok_recs)} 个文件"
+        if failed:
+            msg += "；失败：" + "、".join(r.dbname for r in failed)
+        prog.finish(cid, "success" if not failed else "failed", msg)
+        log.info("[backups] 手动备份结束 cid=%s ok=%s failed=%s", cid, len(ok_recs), len(failed))
+    except Exception as e:  # noqa: BLE001
+        log.warning("[backups] 手动备份异常 cid=%s: %s", cid, e)
+        prog.finish(cid, "failed", str(e)[:500])
+    finally:
+        db.close()
+
+
 @router.post("/run/{cid}")
 def run_now(cid: int, body: BackupRunIn, _user: CurrentUser, db: DbSess) -> dict:
     conn = db.query(DbConnection).filter(DbConnection.id == cid).one_or_none()
     if not conn:
         raise HTTPException(status_code=404, detail="连接不存在")
-    recs = execute_backup(
-        db,
-        cid,
-        backup_type=body.backup_type,
-        compress=body.compress,
-        retain_days=body.retain_days,
-        delete_old=body.delete_old,
-        trigger="manual",
-    )
-    if not recs:
-        raise HTTPException(status_code=400, detail="没有可备份的数据库")
-    failed = [r for r in recs if r.status == "failed"]
-    ok_recs = [r for r in recs if r.status == "success"]
-    if not ok_recs:
-        raise HTTPException(status_code=400, detail=failed[0].error_message or "备份失败")
-    msg = f"已在数据库服务器 {conn.host} 生成 {len(ok_recs)} 个文件（请打开子目录，不在备份目录根下）："
-    msg += "；".join((r.file_path or r.dbname) for r in ok_recs)
-    if failed:
-        msg += "；失败：" + "、".join(f"{r.dbname}" for r in failed)
-    return {
-        "ok": True,
-        "message": msg,
-        "items": [_to_out(r, conn).model_dump() for r in recs],
-    }
+    if not prog.start_job(cid, 1):
+        raise HTTPException(status_code=409, detail="该连接正在备份，请稍后再试")
+    threading.Thread(target=_run_manual_job, args=(cid, body), daemon=True).start()
+    log.info("[backups] 已启动后台备份 cid=%s type=%s", cid, body.backup_type)
+    return {"ok": True, "started": True, "connection_id": cid}
+
+
+@router.get("/progress/{cid}")
+def backup_progress(cid: int, _user: CurrentUser) -> dict:
+    item = prog.get_job(cid)
+    return {"ok": True, "item": item}
 
 
 @router.get("/{bid}/download")

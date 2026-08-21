@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
 from app.models import BackupRecord, DbConnection, Schedule
+from app.services import progress as prog
 from app.services.backup import resolve_backup_databases, run_backup
 from app.services.notify import notify_backup_result
 from app.services.remote_upload import upload_backup_to_remote
@@ -131,7 +132,11 @@ def execute_backup(
             sch.last_error = ""
             db.commit()
     recs: list[BackupRecord] = []
-    for name in names:
+    total = max(len(names), 1)
+    if names:
+        prog.set_total(connection_id, total, names[0])
+    for i, name in enumerate(names):
+        prog.mark_db_start(connection_id, name, i, total)
         recs.append(
             _backup_one(
                 db,
@@ -145,6 +150,7 @@ def execute_backup(
                 trigger=trigger,
             )
         )
+        prog.mark_db_done(connection_id, name, i + 1, total)
     if schedule_id:
         sch = db.query(Schedule).filter(Schedule.id == schedule_id).one_or_none()
         if sch:

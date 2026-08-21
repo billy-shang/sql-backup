@@ -54,10 +54,11 @@ def _migrate() -> None:
         add_col("db_connections", "remote_enabled", "remote_enabled BOOLEAN NOT NULL DEFAULT 0")
         add_col("db_connections", "remote_target_id", "remote_target_id INTEGER NOT NULL DEFAULT 0")
         add_col("notify_config", "wecom_webhook", "wecom_webhook VARCHAR(1024) NOT NULL DEFAULT ''")
+        add_col("notify_config", "dingtalk_webhook", "dingtalk_webhook VARCHAR(1024) NOT NULL DEFAULT ''")
         add_col(
             "notify_config",
             "notify_channel",
-            "notify_channel VARCHAR(16) NOT NULL DEFAULT 'feishu'",
+            "notify_channel VARCHAR(64) NOT NULL DEFAULT 'feishu'",
         )
     except Exception as e:  # noqa: BLE001
         log.warning("[boot] 结构迁移跳过: %s", e)
