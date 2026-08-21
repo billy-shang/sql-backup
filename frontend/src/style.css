@@ -1,0 +1,46 @@
+html, body, #app {
+  margin: 0;
+  height: 100%;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #f4f6fb;
+  color: #1f2937;
+}
+a { color: inherit; }
+.page-card {
+  background: #fff;
+  border: 1px solid #ebeef5;
+  border-radius: 12px;
+  padding: 16px 18px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.page-head h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 650;
+}
+.muted { color: #909399; font-size: 13px; }
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.stat-item {
+  background: #fff;
+  border: 1px solid #ebeef5;
+  border-radius: 12px;
+  padding: 16px 18px;
+}
+.stat-item .n {
+  font-size: 28px;
+  font-weight: 700;
+  color: #2563eb;
+}
+.stat-item .l { color: #6b7280; margin-top: 4px; font-size: 13px; }

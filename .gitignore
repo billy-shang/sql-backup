@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+data/
+.env
+frontend/node_modules/
+frontend/dist/
+*.bak
+*.db
+secret.key
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,18 @@
+services:
+  sql-backup:
+    build:
+      context: .
+      platforms:
+        - linux/amd64
+      provenance: false
+      sbom: false
+    image: sql-backup:latest
+    ports:
+      - "8788:8788"
+    environment:
+      SQL_BACKUP_DATA_DIR: /data
+      TZ: Asia/Shanghai
+    volumes:
+      # 本机 data/ 与容器 /data 同一份：库、密钥、临时 bak
+      - ./data:/data
+    restart: unless-stopped

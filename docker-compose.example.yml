@@ -1,0 +1,12 @@
+# 别人下载后直接用这一份（不需要源码、不执行 build）
+services:
+  sql-backup:
+    image: billyshang/sql-backup:v1.0.3
+    ports:
+      - "8788:8788"
+    environment:
+      SQL_BACKUP_DATA_DIR: /data
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
