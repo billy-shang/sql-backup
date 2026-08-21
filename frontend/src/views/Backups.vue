@@ -20,17 +20,17 @@
     </div>
     <el-table :data="items" stripe v-loading="loading" class="fit-table" table-layout="fixed" empty-text="暂无备份记录">
       <el-table-column prop="connection_name" label="连接" show-overflow-tooltip />
-      <el-table-column prop="database" label="库名" width="100" show-overflow-tooltip />
-      <el-table-column label="时间" width="136">
+      <el-table-column prop="database" label="库名" width="120" show-overflow-tooltip />
+      <el-table-column label="时间" width="152">
         <template #default="{ row }">{{ fmtTimeShort(row.started_at) }}</template>
       </el-table-column>
-      <el-table-column label="类型" width="56">
+      <el-table-column label="类型" width="64">
         <template #default="{ row }">{{ typeMap[row.backup_type] || row.backup_type }}</template>
       </el-table-column>
-      <el-table-column label="大小" width="72">
+      <el-table-column label="大小" width="96">
         <template #default="{ row }">{{ fmtSize(row.file_size) }}</template>
       </el-table-column>
-      <el-table-column label="状态" width="64">
+      <el-table-column label="状态" width="80">
         <template #default="{ row }">
           <el-tag :type="statusType(row.status)" size="small" :title="row.error_message || ''">{{ statusText(row.status) }}</el-tag>
         </template>
@@ -47,7 +47,7 @@
           <span v-else>—</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" :width="admin ? 112 : 64">
+      <el-table-column label="操作" class-name="ops-col" :width="admin ? 148 : 80">
         <template #default="{ row }">
           <div class="ops-cell">
             <el-button text type="primary" :disabled="!row.downloadable" @click="download(row)">下载</el-button>

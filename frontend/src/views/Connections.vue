@@ -12,17 +12,20 @@
     </div>
     <el-table :data="items" stripe v-loading="loading" class="fit-table" table-layout="fixed" empty-text="暂无连接">
       <el-table-column prop="name" label="名称" show-overflow-tooltip />
-      <el-table-column label="地址" width="168" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.host }}:{{ row.port }} · {{ modeMap[row.connect_mode] || row.connect_mode }}</template>
+      <el-table-column label="地址" width="158" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.host }}:{{ row.port }}</template>
+      </el-table-column>
+      <el-table-column label="方式" width="64">
+        <template #default="{ row }">{{ row.connect_mode === "ssh" ? "SSH" : "直连" }}</template>
       </el-table-column>
       <el-table-column label="数据库" show-overflow-tooltip>
         <template #default="{ row }">{{ row.database_label || dbLabel(row.database) }}</template>
       </el-table-column>
-      <el-table-column prop="backup_dir" label="备份目录" width="108" show-overflow-tooltip />
+      <el-table-column prop="backup_dir" label="备份目录" width="120" show-overflow-tooltip />
       <el-table-column label="群晖" width="56">
         <template #default="{ row }">{{ row.remote_enabled ? "是" : "否" }}</template>
       </el-table-column>
-      <el-table-column label="进度" width="140">
+      <el-table-column label="进度" width="150">
         <template #default="{ row }">
           <div
             v-if="backupStates[row.id]"
@@ -36,7 +39,7 @@
           <span v-else class="muted">—</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" :width="admin ? 168 : 88">
+      <el-table-column label="操作" class-name="ops-col" :width="admin ? 210 : 88">
         <template #default="{ row }">
           <div class="ops-cell">
             <el-button text type="success" :disabled="backupStates[row.id]?.status === 'running'" @click="openRun(row)">备份</el-button>
@@ -156,7 +159,7 @@
         </el-table-column>
         <el-table-column prop="username" label="账号" width="90" show-overflow-tooltip />
         <el-table-column prop="remote_dir" label="远程目录" show-overflow-tooltip />
-        <el-table-column label="操作" width="112">
+        <el-table-column label="操作" class-name="ops-col" width="140">
           <template #default="{ row }">
             <div class="ops-cell">
               <el-button text @click="openRemoteEdit(row)">编辑</el-button>
@@ -198,7 +201,7 @@
 import { onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import http, { errMsg } from "../api";
-import { dbLabel, isAdmin, modeMap } from "../format";
+import { dbLabel, isAdmin } from "../format";
 
 const admin = isAdmin();
 const loading = ref(false);

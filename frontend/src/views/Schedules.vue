@@ -13,19 +13,19 @@
       <el-table-column label="周期" width="128" show-overflow-tooltip>
         <template #default="{ row }">{{ cycleText(row) }}</template>
       </el-table-column>
-      <el-table-column label="类型" width="56">
+      <el-table-column label="类型" width="64">
         <template #default="{ row }">{{ typeMap[row.backup_type] }}</template>
       </el-table-column>
-      <el-table-column prop="retain_days" label="保留" width="56" />
-      <el-table-column label="状态" width="72">
+      <el-table-column prop="retain_days" label="保留" width="64" />
+      <el-table-column label="状态" width="90">
         <template #default="{ row }">
           <el-tag :type="statusType(row.last_status)" size="small" :title="row.last_error || ''">{{ statusText(row.last_status) || (row.enabled ? "待运行" : "暂停") }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="上次运行" width="136">
+      <el-table-column label="上次运行" width="152">
         <template #default="{ row }">{{ fmtTimeShort(row.last_run_at) }}</template>
       </el-table-column>
-      <el-table-column v-if="admin" label="操作" width="156">
+      <el-table-column v-if="admin" label="操作" class-name="ops-col" width="210">
         <template #default="{ row }">
           <div class="ops-cell">
             <el-button v-if="row.enabled" text @click="pause(row)">暂停</el-button>

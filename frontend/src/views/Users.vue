@@ -8,16 +8,18 @@
       <el-button type="primary" @click="open()">新增用户</el-button>
     </div>
     <el-table :data="items" stripe v-loading="loading" class="fit-table" table-layout="fixed" empty-text="暂无用户">
-      <el-table-column prop="username" label="用户名" />
-      <el-table-column label="角色" width="120">
+      <el-table-column prop="username" label="用户名" min-width="160" />
+      <el-table-column label="角色" min-width="120">
         <template #default="{ row }">{{ row.role === "admin" ? "管理员" : "普通运维" }}</template>
       </el-table-column>
-      <el-table-column label="创建时间" width="168">
+      <el-table-column label="创建时间" min-width="180">
         <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="80">
+      <el-table-column label="操作" class-name="ops-col" width="100">
         <template #default="{ row }">
-          <el-button text type="danger" @click="remove(row)">删除</el-button>
+          <div class="ops-cell">
+            <el-button text type="danger" @click="remove(row)">删除</el-button>
+          </div>
         </template>
       </el-table-column>
     </el-table>
