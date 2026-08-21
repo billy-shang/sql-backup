@@ -4,6 +4,9 @@
 
 Web 管理后台为 **Vue3 + Element Plus**。
 
+- 源码：https://github.com/billy-shang/sql-backup
+- Docker 镜像：https://hub.docker.com/r/billyshang/sql-backup
+
 ## 功能
 
 | 模块 | 说明 |
