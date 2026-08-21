@@ -94,6 +94,17 @@ def finish(cid: int, status: str, message: str) -> None:
         _jobs[cid] = job
 
 
+def list_jobs() -> list[dict[str, Any]]:
+    with _lock:
+        cids = list(_jobs.keys())
+    items: list[dict[str, Any]] = []
+    for cid in cids:
+        job = get_job(cid)
+        if job:
+            items.append(job)
+    return items
+
+
 def get_job(cid: int) -> dict[str, Any] | None:
     cid = int(cid)
     with _lock:

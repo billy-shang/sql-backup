@@ -32,6 +32,11 @@ a { color: inherit; }
   text-overflow: ellipsis;
   word-break: keep-all;
 }
+.wrap-table :deep(.el-table__cell .cell) {
+  white-space: normal;
+  word-break: break-all;
+  line-height: 1.55;
+}
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

@@ -18,9 +18,9 @@
         <el-button @click="load">刷新</el-button>
       </div>
     </div>
-    <el-table :data="items" stripe v-loading="loading">
+    <el-table :data="items" stripe v-loading="loading" class="wrap-table">
       <el-table-column prop="connection_name" label="数据库连接" min-width="140" />
-      <el-table-column prop="database" label="库名" width="110" />
+      <el-table-column prop="database" label="库名" min-width="110" />
       <el-table-column label="备份时间" width="170">
         <template #default="{ row }">{{ fmtTime(row.started_at) }}</template>
       </el-table-column>
@@ -35,15 +35,15 @@
           <el-tag :type="statusType(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="file_path" label="路径" min-width="240" show-overflow-tooltip />
-      <el-table-column label="群晖" min-width="160" show-overflow-tooltip>
+      <el-table-column prop="file_path" label="路径" min-width="240" />
+      <el-table-column label="群晖" min-width="180">
         <template #default="{ row }">
           <span v-if="row.remote_status === 'success'">{{ row.remote_path || "已上传" }}</span>
           <span v-else-if="row.remote_status === 'failed'" style="color:#dc2626">{{ row.remote_error || "上传失败" }}</span>
           <span v-else>—</span>
         </template>
       </el-table-column>
-      <el-table-column prop="error_message" label="失败原因" min-width="160" show-overflow-tooltip />
+      <el-table-column prop="error_message" label="失败原因" min-width="180" />
       <el-table-column label="操作" width="160" fixed="right">
         <template #default="{ row }">
           <el-button text type="primary" :disabled="!row.downloadable" @click="download(row)">下载</el-button>

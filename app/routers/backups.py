@@ -131,6 +131,11 @@ def run_now(cid: int, body: BackupRunIn, _user: CurrentUser, db: DbSess) -> dict
     return {"ok": True, "started": True, "connection_id": cid}
 
 
+@router.get("/progress")
+def backup_progress_all(_user: CurrentUser) -> dict:
+    return {"ok": True, "items": prog.list_jobs()}
+
+
 @router.get("/progress/{cid}")
 def backup_progress(cid: int, _user: CurrentUser) -> dict:
     item = prog.get_job(cid)

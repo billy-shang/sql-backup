@@ -3,13 +3,13 @@
 SQL Server 备份管理平台。平台可部署在任意机器；`.bak` 写在 **SQL Server 所在服务器**，不是本平台。
 
 - 源码：https://github.com/billy-shang/sql-backup
-- 镜像：https://hub.docker.com/r/billyshang/sql-backup （当前 `v1.0.32`）
+- 镜像：https://hub.docker.com/r/billyshang/sql-backup （当前 `v1.0.33`）
 
 ## 功能
 
 - 多实例连接（直连 / SSH），完整 / 差异 / 日志备份
 - 定时任务、保留策略、群晖 File Station 远程归档
-- 飞书 / 企业微信 / 钉钉通知（可单选或同时启用）
+- WebHook 通知：飞书 / 企业微信 / 钉钉（可单选或同时启用）
 - 管理员 / 普通运维
 
 备份路径：`{目录}\{库名}\{YYYY-MM-DD}\{库名}_{时间}_{类型}.bak`  
@@ -27,15 +27,15 @@ python -m app
 ## Docker
 
 ```bash
-docker pull billyshang/sql-backup:v1.0.32
+docker pull billyshang/sql-backup:v1.0.33
 docker run -d --name sql-backup --restart unless-stopped \
   -p 8788:8788 -e TZ=Asia/Shanghai -e SQL_BACKUP_DATA_DIR=/data \
-  -v "$PWD/data:/data" billyshang/sql-backup:v1.0.32
+  -v "$PWD/data:/data" billyshang/sql-backup:v1.0.33
 ```
 
-`data/` 必须整目录持久化（SQLite 与 `secret.key` 不能拆开）。群晖等旧 Docker 请用 `v1.0.32`（linux/amd64，关闭 provenance）：
+`data/` 必须整目录持久化（SQLite 与 `secret.key` 不能拆开）。群晖等旧 Docker 请用 `v1.0.33`（linux/amd64，关闭 provenance）：
 
 ```bash
 docker build --provenance=false --sbom=false --platform linux/amd64 \
-  -t billyshang/sql-backup:v1.0.32 .
+  -t billyshang/sql-backup:v1.0.33 .
 ```

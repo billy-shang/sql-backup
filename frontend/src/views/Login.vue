@@ -8,7 +8,7 @@
           </svg>
         </div>
         <h1>SQL Backup</h1>
-        <p>把 SQL Server 备份落到数据库服务器本地，成功后再归档群晖、通知飞书。</p>
+        <p>把 SQL Server 备份落到数据库服务器本地，成功后再归档群晖、通过 WebHook 通知。</p>
       </div>
 
       <div class="login-card">
@@ -53,8 +53,8 @@
         </div>
         <div class="feat">
           <span class="dot orange" />
-          <h3>飞书通知</h3>
-          <p>成功绿色、失败红色卡片，便于值班人员快速排查。</p>
+          <h3>WebHook 通知</h3>
+          <p>支持飞书、企业微信、钉钉机器人，成功/失败及时推送值班人员。</p>
         </div>
       </div>
     </div>

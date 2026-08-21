@@ -279,16 +279,9 @@ function selectUserOnly() {
   selectedDbs.value = userDbNames();
 }
 
-function sameSet(a, b) {
-  if (a.length !== b.length) return false;
-  const s = new Set(b);
-  return a.every((x) => s.has(x));
-}
-
 function databasePayload() {
-  if (!dbOptions.value.length) return "";
+  if (!dbOptions.value.length) return String(form.database || "").trim();
   if (!selectedDbs.value.length) return "";
-  if (sameSet(selectedDbs.value, userDbNames())) return "";
   return selectedDbs.value.join(",");
 }
 
@@ -437,30 +430,40 @@ function startProgress(cid) {
   };
 }
 
+function applyJob(item, toast) {
+  const cid = item && item.connection_id;
+  if (!cid) return;
+  const prev = backupStates[cid]?.status;
+  backupStates[cid] = {
+    percent: Number(item.percent) || 0,
+    status: item.status || "running",
+    message: item.message || "",
+    current_db: item.current_db || "",
+    done: item.done || 0,
+    total: item.total || 1,
+  };
+  if (item.status === "success") {
+    stopTimer(cid);
+    if (toast && prev === "running") ElMessage.success(item.message || "备份完成");
+    window.setTimeout(() => {
+      if (backupStates[cid]?.status === "success") delete backupStates[cid];
+    }, 4000);
+  } else if (item.status === "failed") {
+    stopTimer(cid);
+    if (toast && prev === "running") ElMessage.error(item.message || "备份失败");
+    window.setTimeout(() => {
+      if (backupStates[cid]?.status === "failed") delete backupStates[cid];
+    }, 8000);
+  }
+}
+
 function pollProgress(cid) {
   stopTimer(cid);
   const tick = async () => {
     try {
       const { data } = await http.get(`/backups/progress/${cid}`);
-      const item = data.item;
-      if (!item) return;
-      backupStates[cid] = {
-        percent: Number(item.percent) || 0,
-        status: item.status || "running",
-        message: item.message || "",
-        current_db: item.current_db || "",
-        done: item.done || 0,
-        total: item.total || 1,
-      };
-      if (item.status === "success") {
-        stopTimer(cid);
-        ElMessage.success(item.message || "备份完成");
-        window.setTimeout(() => delete backupStates[cid], 4000);
-      } else if (item.status === "failed") {
-        stopTimer(cid);
-        ElMessage.error(item.message || "备份失败");
-        window.setTimeout(() => delete backupStates[cid], 8000);
-      }
+      if (!data.item) return;
+      applyJob(data.item, true);
     } catch (e) {
       stopTimer(cid);
       finishProgress(cid, "failed", errMsg(e));
@@ -468,6 +471,18 @@ function pollProgress(cid) {
   };
   tick();
   backupTimers.set(cid, window.setInterval(tick, 800));
+}
+
+async function restoreProgress() {
+  try {
+    const { data } = await http.get("/backups/progress");
+    for (const item of data.items || []) {
+      applyJob(item, false);
+      if (item.status === "running") pollProgress(item.connection_id);
+    }
+  } catch {
+    /* 旧服务端可能没有该接口 */
+  }
 }
 
 function stopTimer(cid) {
@@ -576,6 +591,7 @@ async function removeRemote(row) {
 onMounted(() => {
   load();
   loadRemotes();
+  restoreProgress();
 });
 
 onBeforeUnmount(() => {
