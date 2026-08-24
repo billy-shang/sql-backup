@@ -9,7 +9,7 @@ import socket
 import stat
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -1183,16 +1183,96 @@ def _sql_delete_bak_in_folder(conn: Any, folder: str) -> None:
     _drain_cursor(cur)
 
 
+def _sql_config_int(conn: Any, name: str) -> int | None:
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT CAST(value_in_use AS INT) FROM master.sys.configurations WHERE name = " + _sql_nv(name)
+    )
+    row = cur.fetchone()
+    _drain_cursor(cur)
+    if row and row[0] is not None:
+        return int(row[0])
+    return None
+
+
+def _sql_reconfigure(conn: Any, name: str, value: int) -> None:
+    """只允许改外围选项；name 来自白名单。"""
+    allowed = {"show advanced options", "xp_cmdshell", "Ole Automation Procedures"}
+    if name not in allowed:
+        raise ValueError(name)
+    cur = conn.cursor()
+    cur.execute(f"EXEC master.dbo.sp_configure {_sql_nv(name)}, {int(value)}")
+    _drain_cursor(cur)
+    cur = conn.cursor()
+    try:
+        cur.execute("RECONFIGURE")
+        _drain_cursor(cur)
+    except Exception:  # noqa: BLE001
+        cur = conn.cursor()
+        cur.execute("RECONFIGURE WITH OVERRIDE")
+        _drain_cursor(cur)
+
+
+@contextmanager
+def _sql_temp_enable(conn: Any, option: str):
+    """临时打开 xp_cmdshell / OLE，清理完立刻恢复原值。"""
+    current = _sql_config_int(conn, option)
+    advanced = _sql_config_int(conn, "show advanced options")
+    changed = False
+    adv_changed = False
+    try:
+        if current == 1:
+            yield True
+            return
+        if advanced != 1:
+            _sql_reconfigure(conn, "show advanced options", 1)
+            adv_changed = True
+        _sql_reconfigure(conn, option, 1)
+        changed = True
+        log.info("[backup] 已临时开启 %s（原值=%s，结束后恢复）", option, current)
+        yield True
+    except Exception as e:  # noqa: BLE001
+        log.warning("[backup] 无法开启 %s: %s", option, e)
+        yield False
+    finally:
+        if changed:
+            try:
+                _sql_reconfigure(conn, option, int(current or 0))
+                log.info("[backup] 已恢复 %s=%s", option, current)
+            except Exception as e:  # noqa: BLE001
+                log.warning("[backup] 恢复 %s 失败: %s", option, e)
+        if adv_changed:
+            try:
+                _sql_reconfigure(conn, "show advanced options", int(advanced or 0))
+            except Exception as e:  # noqa: BLE001
+                log.warning("[backup] 恢复 show advanced options 失败: %s", e)
+
+
+def _sql_folder_exists(conn: Any, folder: str) -> bool:
+    cur = conn.cursor()
+    cur.execute(f"EXEC master.dbo.xp_fileexist {_sql_nv(folder)}")
+    row = cur.fetchone()
+    _drain_cursor(cur)
+    if not row:
+        return False
+    exist = int(row[0] or 0)
+    isdir = int(row[1] or 0) if len(row) > 1 else 0
+    return bool(exist or isdir)
+
+
 def _sql_rmdir(conn: Any, folder: str) -> None:
-    """仅直连模式兜底：多数生产环境会关闭 xp_cmdshell / OLE，失败很正常。"""
+    """在 SQL Server 本机删目录。需要 xp_cmdshell 或 OLE（可临时开启）。"""
     win = folder.replace("/", "\\").replace('"', "")
     cur = conn.cursor()
     try:
         cur.execute(f"EXEC master.dbo.xp_cmdshell {_sql_nv(f'rmdir /s /q \"{win}\"')}")
         _drain_cursor(cur)
-        return
+        if not _sql_folder_exists(conn, win):
+            log.info("[backup] xp_cmdshell 已删除目录 %s", win)
+            return
+        raise RuntimeError("xp_cmdshell 执行后目录仍在")
     except Exception as e:  # noqa: BLE001
-        log.info("[backup] xp_cmdshell 已关闭，改试 OLE: %s", e)
+        log.info("[backup] xp_cmdshell 删目录失败，改试 OLE: %s", e)
     cur = conn.cursor()
     cur.execute(
         "DECLARE @fso int, @ok int; "
@@ -1201,14 +1281,21 @@ def _sql_rmdir(conn: Any, folder: str) -> None:
         "EXEC master.dbo.sp_OADestroy @fso;"
     )
     _drain_cursor(cur)
+    if _sql_folder_exists(conn, win):
+        raise RuntimeError(f"目录仍在 {win}")
 
 
 def _remove_day_folder(folder: str, *, conn: Any, ssh_client: Any = None) -> None:
-    """先删目录里的 .bak，再删空日期文件夹。SSH 优先，避免依赖已关闭的 xp_cmdshell。"""
+    """先删 .bak。Windows 目录走 SQL；SSH 只用于 Linux 本机路径（跳板机看不到 G:）。"""
     try:
         _sql_delete_bak_in_folder(conn, folder)
     except Exception as e:  # noqa: BLE001
         log.info("[backup] xp_delete_file 删 .bak 失败 %s: %s", folder, e)
+    if _is_windows_path(folder):
+        if ssh_client is not None:
+            log.info("[backup] SSH 是跳板机，看不到 Windows 路径，改用 SQL 删目录 %s", folder)
+        _sql_rmdir(conn, folder)
+        return
     if ssh_client is not None:
         _ssh_rmdir(ssh_client, folder)
         return
@@ -1246,7 +1333,7 @@ def _sql_cleanup_old_backups(
             log.info("[backup] 已按文件日期清理 %s 中早于 %s 的 .bak", db_root, cutoff)
         except Exception as e:  # noqa: BLE001
             log.warning("[backup] 按文件日期清理失败: %s", e)
-        if ssh_client is not None:
+        if ssh_client is not None and not _is_windows_path(db_root):
             try:
                 _sftp_cleanup(ssh_client, root, database, retain_days)
             except Exception as e:  # noqa: BLE001
@@ -1255,13 +1342,30 @@ def _sql_cleanup_old_backups(
     if not expired:
         log.info("[backup] 没有超过 %s 天的日期目录", retain_days)
         return
-    for name in expired:
-        folder = _join_backup_path(root, database, name, "").rstrip("/\\")
-        try:
-            _remove_day_folder(folder, conn=conn, ssh_client=ssh_client)
-            log.info("[backup] 已删除 SQL Server 过期备份 %s", folder)
-        except Exception as e:  # noqa: BLE001
-            log.warning("[backup] 删除 SQL Server 过期备份失败 %s: %s", folder, e)
+    windows_days = _is_windows_path(db_root)
+    with _sql_temp_enable(conn, "xp_cmdshell") as cmd_ok:
+        extra = (
+            _sql_temp_enable(conn, "Ole Automation Procedures")
+            if windows_days and not cmd_ok
+            else nullcontext(False)
+        )
+        with extra as ole_ok:
+            if windows_days and not cmd_ok and not ole_ok:
+                log.warning(
+                    "[backup] 无法临时开启 xp_cmdshell/OLE，只能删 .bak，空日期目录会留下。"
+                    "SQL 账号需要 sysadmin，且策略允许改 sp_configure。"
+                )
+            for name in expired:
+                folder = _join_backup_path(root, database, name, "").rstrip("/\\")
+                try:
+                    _remove_day_folder(
+                        folder,
+                        conn=conn,
+                        ssh_client=None if windows_days else ssh_client,
+                    )
+                    log.info("[backup] 已删除 SQL Server 过期备份 %s", folder)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("[backup] 删除 SQL Server 过期备份失败 %s: %s", folder, e)
 
 
 def _local_cleanup(database: str, retain_days: int) -> None:
