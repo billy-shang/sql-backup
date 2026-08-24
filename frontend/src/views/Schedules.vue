@@ -34,7 +34,7 @@
       <el-table-column v-if="!compact" label="下次" width="136">
         <template #default="{ row }">{{ row.enabled ? fmtTimeShort(row.next_run_at) : "—" }}</template>
       </el-table-column>
-      <el-table-column v-if="admin" label="操作" class-name="ops-col" align="left" fixed="right" :width="opsWidth">
+      <el-table-column v-if="admin" label="操作" class-name="ops-col" align="left" :width="opsWidth" :min-width="opsWidth">
         <template #default="{ row }">
           <div class="ops-cell">
             <el-button text type="success" @click="runNow(row)">执行</el-button>
@@ -116,7 +116,7 @@ import { useBreakpoints } from "../useBreakpoints";
 
 const admin = isAdmin();
 const { compact, narrow } = useBreakpoints();
-const opsWidth = computed(() => (narrow.value ? 176 : 252));
+const opsWidth = computed(() => (narrow.value ? 208 : 288));
 const loading = ref(false);
 const saving = ref(false);
 const items = ref([]);

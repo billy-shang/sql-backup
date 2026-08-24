@@ -52,7 +52,7 @@
           <span v-else class="muted">—</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" class-name="ops-col" align="left" fixed="right" :width="opsWidth">
+      <el-table-column label="操作" class-name="ops-col" align="left" :width="opsWidth" :min-width="opsWidth">
         <template #default="{ row }">
           <div class="ops-cell">
             <el-button text type="success" :disabled="backupStates[row.id]?.status === 'running'" @click="openRun(row)">备份</el-button>
@@ -186,7 +186,7 @@
         </el-table-column>
         <el-table-column prop="username" label="账号" width="90" show-overflow-tooltip />
         <el-table-column prop="remote_dir" label="远程目录" show-overflow-tooltip />
-        <el-table-column label="操作" class-name="ops-col" align="left" width="120" fixed="right">
+        <el-table-column label="操作" class-name="ops-col" align="left" width="140" min-width="140">
           <template #default="{ row }">
             <div class="ops-cell">
               <el-button text @click="openRemoteEdit(row)">编辑</el-button>
@@ -237,8 +237,8 @@ const { compact, narrow } = useBreakpoints();
 
 const admin = isAdmin();
 const opsWidth = computed(() => {
-  if (admin) return narrow.value ? 176 : 252;
-  return narrow.value ? 116 : 108;
+  if (admin) return narrow.value ? 208 : 288;
+  return narrow.value ? 132 : 128;
 });
 const loading = ref(false);
 const saving = ref(false);

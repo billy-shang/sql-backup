@@ -58,7 +58,7 @@
           <span v-else>—</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" class-name="ops-col" align="left" fixed="right" :width="opsWidth">
+      <el-table-column label="操作" class-name="ops-col" align="left" :width="opsWidth" :min-width="opsWidth">
         <template #default="{ row }">
           <div class="ops-cell">
             <el-button text type="primary" :disabled="!row.downloadable" @click="download(row)">下载</el-button>
@@ -166,8 +166,8 @@ const { compact, narrow } = useBreakpoints();
 
 const admin = isAdmin();
 const opsWidth = computed(() => {
-  if (admin) return narrow.value ? 176 : 188;
-  return 72;
+  if (admin) return narrow.value ? 208 : 236;
+  return 88;
 });
 const loading = ref(false);
 const items = ref([]);

@@ -409,7 +409,7 @@ onBeforeUnmount(() => {
 .uname { font-weight: 650; font-size: 14px; color: #1f2329; }
 .role { font-size: 12px; color: #8a8f99; }
 .chev { color: #c0c4cc; font-size: 12px; }
-.main { padding: 16px 18px 24px; background: #f5f7fa; overflow-x: hidden; min-width: 0; }
+.main { padding: 16px 18px 24px; background: #f5f7fa; overflow-x: auto; min-width: 0; }
 .app-footer {
   flex: 0 0 34px;
   min-height: 34px;

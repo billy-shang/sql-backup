@@ -15,7 +15,7 @@
       <el-table-column v-if="!narrow" label="创建时间" min-width="180">
         <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" class-name="ops-col" align="left" fixed="right" :width="narrow ? 136 : 148">
+      <el-table-column label="操作" class-name="ops-col" align="left" :width="narrow ? 160 : 176" :min-width="narrow ? 160 : 176">
         <template #default="{ row }">
           <div class="ops-cell">
             <el-button text @click="openReset(row)">重置密码</el-button>
