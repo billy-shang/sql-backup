@@ -1,8 +1,11 @@
 """群晖 File Station 上传。登录用 POST；上传把 SID 放在 URL，并带 SynoToken。"""
 from __future__ import annotations
 
+import json
 import logging
 import posixpath
+import time
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -200,6 +203,68 @@ class SynologyClient:
             log.info("[synology] 上传 version=%s 失败: %s", ver, last)
         raise RuntimeError(f"群晖上传失败：{last}")
 
+    def list_names(self, folder: str) -> list[str]:
+        resp = self._client.get(
+            f"{_base_url(self.host, self.port, self.https)}/webapi/entry.cgi",
+            params={
+                "api": "SYNO.FileStation.List",
+                "version": "2",
+                "method": "list",
+                "folder_path": _fs_path(folder),
+                "_sid": self.sid,
+            },
+            headers=self._headers(),
+        )
+        data = resp.json()
+        if not data.get("success"):
+            raise RuntimeError(f"列举群晖目录失败：{_err_text(data)}")
+        files = ((data.get("data") or {}).get("files") or [])
+        names: list[str] = []
+        for item in files:
+            if item.get("isdir") or item.get("is_dir"):
+                names.append(str(item.get("name") or ""))
+        return [n for n in names if n]
+
+    def delete_path(self, path: str) -> None:
+        target = _fs_path(path)
+        resp = self._client.get(
+            f"{_base_url(self.host, self.port, self.https)}/webapi/entry.cgi",
+            params={
+                "api": "SYNO.FileStation.Delete",
+                "version": "2",
+                "method": "start",
+                "path": json.dumps([target]),
+                "accurate_progress": "true",
+                "_sid": self.sid,
+            },
+            headers=self._headers(),
+        )
+        data = resp.json()
+        if not data.get("success"):
+            raise RuntimeError(f"删除群晖路径失败 {target}：{_err_text(data)}")
+        taskid = str((data.get("data") or {}).get("taskid") or "")
+        if not taskid:
+            return
+        for _ in range(40):
+            st = self._client.get(
+                f"{_base_url(self.host, self.port, self.https)}/webapi/entry.cgi",
+                params={
+                    "api": "SYNO.FileStation.Delete",
+                    "version": "2",
+                    "method": "status",
+                    "taskid": taskid,
+                    "_sid": self.sid,
+                },
+                headers=self._headers(),
+            ).json()
+            if st.get("success") and (st.get("data") or {}).get("finished"):
+                err = (st.get("data") or {}).get("error")
+                if err:
+                    raise RuntimeError(f"删除群晖路径失败 {target}：{err}")
+                return
+            time.sleep(0.4)
+        log.warning("[synology] 删除任务未在时限内结束 %s", target)
+
 
 def test_synology(host: str, port: int, username: str, password: str, https: bool, remote_dir: str) -> str:
     cli = SynologyClient(host, port, username, password, https)
@@ -228,5 +293,47 @@ def upload_to_synology(
     try:
         cli.login()
         return cli.upload(local_file, dest, filename)
+    finally:
+        cli.close()
+
+
+def cleanup_synology_days(
+    *,
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    https: bool,
+    remote_dir: str,
+    dest_subdir: str,
+    retain_days: int,
+) -> None:
+    """删除群晖 连接名/库名 下超过保留天数的 YYYY-MM-DD 目录。"""
+    if retain_days <= 0:
+        return
+    parent = posixpath.join(_fs_path(remote_dir), dest_subdir.replace("\\", "/").strip("/"))
+    today = datetime.now().astimezone().date()
+    cli = SynologyClient(host, port, username, password, https)
+    try:
+        cli.login()
+        names = cli.list_names(parent)
+        expired = []
+        for name in names:
+            try:
+                day = datetime.strptime(name, "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if (today - day).days >= max(int(retain_days), 1):
+                expired.append(name)
+        if not expired:
+            log.info("[synology] 没有超过 %s 天的目录 %s", retain_days, parent)
+            return
+        for name in expired:
+            folder = posixpath.join(parent, name)
+            try:
+                cli.delete_path(folder)
+                log.info("[synology] 已删除过期目录 %s", folder)
+            except Exception as e:  # noqa: BLE001
+                log.warning("[synology] 删除过期目录失败 %s: %s", folder, e)
     finally:
         cli.close()

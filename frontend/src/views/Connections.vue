@@ -137,7 +137,10 @@
             <el-option label="日志备份 Log" value="log" />
           </el-select>
         </el-form-item>
-        <el-form-item label="保留天数"><el-input-number v-model="runForm.retain_days" :min="1" :max="3650" /></el-form-item>
+        <el-form-item label="保留天数">
+          <el-input-number v-model="runForm.retain_days" :min="1" :max="3650" />
+          <div class="muted">只留最近 N 天的日期目录。例如 2 = 今天和昨天，更早的会从 SQL Server 和群晖删除。</div>
+        </el-form-item>
         <el-form-item label="压缩"><el-switch v-model="runForm.compress" /></el-form-item>
         <el-form-item label="删除旧备份"><el-switch v-model="runForm.delete_old" /></el-form-item>
       </el-form>

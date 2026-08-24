@@ -1026,10 +1026,18 @@ def _sftp_download(client: paramiko.SSHClient, remote: str, local: Path) -> int:
         sftp.close()
 
 
+def _is_expired_day(name: str, retain_days: int) -> bool:
+    """保留 N 天：今天算第 1 天。N=2 时只留今天和昨天，更早的日期目录删除。"""
+    try:
+        day = datetime.strptime(name, "%Y-%m-%d").date()
+    except ValueError:
+        return False
+    return (_now().date() - day).days >= max(int(retain_days), 1)
+
+
 def _sftp_cleanup(client: paramiko.SSHClient, remote_root: str, database: str, retain_days: int) -> None:
     if retain_days <= 0:
         return
-    cutoff = _now() - timedelta(days=retain_days)
     db_root = _join_backup_path(remote_root, database, "", "").rstrip("/\\")
     sftp = client.open_sftp()
     try:
@@ -1039,11 +1047,7 @@ def _sftp_cleanup(client: paramiko.SSHClient, remote_root: str, database: str, r
             return
         for item in days:
             name = item.filename
-            try:
-                day_dt = datetime.strptime(name, "%Y-%m-%d").replace(tzinfo=_now().tzinfo)
-            except ValueError:
-                continue
-            if day_dt.date() >= cutoff.date():
+            if not _is_expired_day(name, retain_days):
                 continue
             folder = _join_backup_path(remote_root, database, name, "").rstrip("/\\")
             try:
@@ -1058,19 +1062,105 @@ def _sftp_cleanup(client: paramiko.SSHClient, remote_root: str, database: str, r
         sftp.close()
 
 
+def _sql_list_day_folders(conn: Any, db_root: str) -> list[str]:
+    cur = conn.cursor()
+    cur.execute(f"EXEC master.sys.xp_dirtree {_sql_nv(db_root)}, 1, 1")
+    names: list[str] = []
+    try:
+        while True:
+            try:
+                rows = cur.fetchall() or []
+            except Exception:  # noqa: BLE001
+                rows = []
+            for row in rows:
+                name = str(row[0] or "").strip()
+                is_file = int(row[2] or 0) if len(row) > 2 else 0
+                if name and not is_file:
+                    names.append(name)
+            if not cur.nextset():
+                break
+    except Exception:  # noqa: BLE001
+        pass
+    return names
+
+
+def _sql_delete_bak_in_folder(conn: Any, folder: str) -> None:
+    """xp_delete_file 只认 SQL Server 本机路径；截止日期用很远的将来，清掉该目录全部 .bak。"""
+    cur = conn.cursor()
+    cur.execute(
+        "EXEC master.dbo.xp_delete_file 0, "
+        f"{_sql_nv(folder)}, N'bak', N'2099-01-01T00:00:00', 0"
+    )
+    _drain_cursor(cur)
+
+
+def _sql_rmdir(conn: Any, folder: str) -> None:
+    win = folder.replace("/", "\\").replace('"', "")
+    cur = conn.cursor()
+    try:
+        cur.execute(f"EXEC master.dbo.xp_cmdshell {_sql_nv(f'rmdir /s /q \"{win}\"')}")
+        _drain_cursor(cur)
+        return
+    except Exception as e:  # noqa: BLE001
+        log.info("[backup] xp_cmdshell 删目录不可用，尝试 OLE: %s", e)
+    cur = conn.cursor()
+    cur.execute(
+        "DECLARE @fso int, @ok int; "
+        "EXEC master.dbo.sp_OACreate 'Scripting.FileSystemObject', @fso OUT; "
+        f"EXEC master.dbo.sp_OAMethod @fso, 'DeleteFolder', @ok OUT, {_sql_nv(win)}, 1; "
+        "EXEC master.dbo.sp_OADestroy @fso;"
+    )
+    _drain_cursor(cur)
+
+
+def _sql_cleanup_old_backups(conn: Any, root: str, database: str, retain_days: int) -> None:
+    """在 SQL Server 本机删除过期日期目录（D:\\sql_backup\\库名\\YYYY-MM-DD）。"""
+    if retain_days <= 0 or not root or not database:
+        return
+    db_root = _join_backup_path(root, database, "", "").rstrip("/\\")
+    log.info("[backup] 按保留 %s 天清理 SQL Server 目录 %s", retain_days, db_root)
+    try:
+        days = _sql_list_day_folders(conn, db_root)
+    except Exception as e:  # noqa: BLE001
+        log.warning("[backup] 列举备份日期目录失败: %s", e)
+        days = []
+    expired = [name for name in days if _is_expired_day(name, retain_days)]
+    if not days:
+        keep_from = _now().date() - timedelta(days=max(int(retain_days) - 1, 0))
+        cutoff = f"{keep_from.isoformat()}T00:00:00"
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "EXEC master.dbo.xp_delete_file 0, "
+                f"{_sql_nv(db_root)}, N'bak', {_sql_nv(cutoff)}, 1"
+            )
+            _drain_cursor(cur)
+            log.info("[backup] 已按文件日期清理 %s 中早于 %s 的 .bak", db_root, cutoff)
+        except Exception as e:  # noqa: BLE001
+            log.warning("[backup] 按文件日期清理失败: %s", e)
+        return
+    if not expired:
+        log.info("[backup] 没有超过 %s 天的日期目录", retain_days)
+        return
+    for name in expired:
+        folder = _join_backup_path(root, database, name, "").rstrip("/\\")
+        try:
+            _sql_delete_bak_in_folder(conn, folder)
+            try:
+                _sql_rmdir(conn, folder)
+            except Exception as e:  # noqa: BLE001
+                log.warning("[backup] 已删 .bak，但目录未去掉 %s: %s", folder, e)
+            log.info("[backup] 已删除 SQL Server 过期备份 %s", folder)
+        except Exception as e:  # noqa: BLE001
+            log.warning("[backup] 删除 SQL Server 过期备份失败 %s: %s", folder, e)
+
+
 def _local_cleanup(database: str, retain_days: int) -> None:
     root = BACKUP_STORE / database
     if not root.exists() or retain_days <= 0:
         return
-    cutoff = _now() - timedelta(days=retain_days)
     for day_dir in root.iterdir():
-        if not day_dir.is_dir():
-            continue
-        try:
-            day_dt = datetime.strptime(day_dir.name, "%Y-%m-%d").replace(tzinfo=_now().tzinfo)
-        except ValueError:
-            continue
-        if day_dt.date() >= cutoff.date():
+        if not day_dir.is_dir() or not _is_expired_day(day_dir.name, retain_days):
             continue
         for f in day_dir.glob("*.bak"):
             try:
@@ -1137,6 +1227,11 @@ def run_backup(
                             backup_type=backup_type,
                             compress=compress,
                         )
+                        if delete_old:
+                            try:
+                                _sql_cleanup_old_backups(dbc, result.get("root") or "", dbname, retain_days)
+                            except Exception as e:  # noqa: BLE001
+                                log.warning("[backup] SQL Server 清理过期备份失败: %s", e)
                     finally:
                         dbc.close()
             except _TunnelConnectError as e:
@@ -1167,9 +1262,7 @@ def run_backup(
                 except Exception as e:  # noqa: BLE001
                     log.warning("[backup] SFTP 拉回失败，备份文件留在数据库服务器 %s : %s", remote_path, e)
             if delete_old:
-                if result.get("is_windows"):
-                    log.info("[backup] Windows 路径无法经 Linux 跳板 SFTP 删旧，跳过远程清理")
-                else:
+                if not result.get("is_windows"):
                     try:
                         _sftp_cleanup(client, result.get("root") or conn_row.backup_dir, dbname, retain_days)
                     except Exception as e:  # noqa: BLE001
@@ -1197,6 +1290,11 @@ def run_backup(
                 backup_type=backup_type,
                 compress=compress,
             )
+            if delete_old:
+                try:
+                    _sql_cleanup_old_backups(dbc, result.get("root") or "", dbname, retain_days)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("[backup] SQL Server 清理过期备份失败: %s", e)
         finally:
             dbc.close()
         remote_path = result["file_path"]

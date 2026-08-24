@@ -19,7 +19,7 @@ from app.services.backup import (
     _ssh_client,
     _tunnel_sql_host,
 )
-from app.services.synology import test_synology, upload_to_synology
+from app.services.synology import cleanup_synology_days, test_synology, upload_to_synology
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +50,14 @@ def probe_remote_target(
     return test_synology(host, port, username, password, https, remote_dir)
 
 
-def upload_backup_to_remote(db: Session, conn_row: DbConnection, rec: Any) -> str:
+def upload_backup_to_remote(
+    db: Session,
+    conn_row: DbConnection,
+    rec: Any,
+    *,
+    retain_days: int = 0,
+    delete_old: bool = False,
+) -> str:
     if not conn_row.remote_enabled or not conn_row.remote_target_id:
         return ""
     target = db.query(RemoteTarget).filter(RemoteTarget.id == conn_row.remote_target_id).one_or_none()
@@ -109,6 +116,21 @@ def upload_backup_to_remote(db: Session, conn_row: DbConnection, rec: Any) -> st
             filename=filename,
         )
         log.info("[remote] 已上传群晖 %s", remote)
+        if delete_old and retain_days > 0:
+            parent = "/".join(dest_parts[:-1] if day else dest_parts)
+            try:
+                cleanup_synology_days(
+                    host=syno["host"],
+                    port=syno["port"],
+                    username=syno["username"],
+                    password=syno["password"],
+                    https=syno["https"],
+                    remote_dir=syno["remote_dir"],
+                    dest_subdir=parent,
+                    retain_days=retain_days,
+                )
+            except Exception as e:  # noqa: BLE001
+                log.warning("[remote] 群晖清理过期目录失败: %s", e)
         return remote
     finally:
         if staged and staged.exists():

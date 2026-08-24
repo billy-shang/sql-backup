@@ -67,7 +67,13 @@ def _backup_one(
         db.commit()
         if conn.remote_enabled and conn.remote_target_id:
             try:
-                rec.remote_path = upload_backup_to_remote(db, conn, rec) or ""
+                rec.remote_path = upload_backup_to_remote(
+                    db,
+                    conn,
+                    rec,
+                    retain_days=retain_days,
+                    delete_old=delete_old,
+                ) or ""
                 rec.remote_status = "success"
                 log.info("[runner] 群晖上传成功 id=%s path=%s", rec.id, rec.remote_path)
             except Exception as re:  # noqa: BLE001
