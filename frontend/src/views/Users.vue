@@ -8,14 +8,14 @@
       <el-button type="primary" @click="open()">新增用户</el-button>
     </div>
     <el-table :data="items" stripe v-loading="loading" class="fit-table" table-layout="fixed" empty-text="暂无用户">
-      <el-table-column prop="username" label="用户名" min-width="160" />
-      <el-table-column label="角色" min-width="120">
+      <el-table-column prop="username" label="用户名" :min-width="narrow ? 100 : 160" />
+      <el-table-column label="角色" :min-width="narrow ? 88 : 120">
         <template #default="{ row }">{{ row.role === "admin" ? "管理员" : "普通运维" }}</template>
       </el-table-column>
-      <el-table-column label="创建时间" min-width="180">
+      <el-table-column v-if="!narrow" label="创建时间" min-width="180">
         <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" class-name="ops-col" align="left" fixed="right" width="148">
+      <el-table-column label="操作" class-name="ops-col" align="left" fixed="right" :width="narrow ? 136 : 148">
         <template #default="{ row }">
           <div class="ops-cell">
             <el-button text @click="openReset(row)">重置密码</el-button>
@@ -62,7 +62,9 @@ import { onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import http, { errMsg } from "../api";
 import { fmtTime } from "../format";
+import { useBreakpoints } from "../useBreakpoints";
 
+const { narrow } = useBreakpoints();
 const meId = (() => {
   try {
     return Number(JSON.parse(localStorage.getItem("sqlbackup-user") || "{}").id || 0);

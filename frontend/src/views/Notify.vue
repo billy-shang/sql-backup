@@ -6,7 +6,7 @@
         <div class="muted">备份完成后，可向飞书、企业微信、钉钉推送结果，可单选或同时启用</div>
       </div>
     </div>
-    <el-form :model="form" label-width="120px" class="notify-form">
+    <el-form :model="form" :label-position="narrow ? 'top' : 'right'" :label-width="narrow ? 'auto' : '120px'" class="notify-form">
       <el-form-item label="启用通知">
         <el-switch v-model="form.enabled" :disabled="!admin" />
       </el-form-item>
@@ -61,8 +61,10 @@ import { onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
 import http, { errMsg } from "../api";
 import { isAdmin } from "../format";
+import { useBreakpoints } from "../useBreakpoints";
 
 const admin = isAdmin();
+const { narrow } = useBreakpoints();
 const saving = ref(false);
 const channels = ref(["feishu"]);
 const form = reactive({

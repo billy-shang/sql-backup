@@ -3,7 +3,7 @@
 SQL Server 备份管理平台。平台可部署在任意机器；`.bak` 写在 **SQL Server 所在服务器**，不是本平台。
 
 - 源码：https://github.com/billy-shang/sql-backup
-- 镜像：https://hub.docker.com/r/billyshang/sql-backup （当前 `v1.0.42`）
+- 镜像：https://hub.docker.com/r/billyshang/sql-backup （当前 `v1.0.43`）
 
 ## 功能
 
@@ -23,22 +23,22 @@ pip install -r requirements.txt
 python -m app
 ```
 
-打开 http://127.0.0.1:8788 ，默认 `admin` / `admin@123`
+打开 http://127.0.0.1:8788 ，默认 `admin` / `admin@123`。窄屏会收起侧栏、隐藏次要列，删除按钮始终可见。删除连接会提示同时删掉对应定时任务。
 
 ## Docker
 
 ```bash
-docker pull billyshang/sql-backup:v1.0.42
+docker pull billyshang/sql-backup:v1.0.43
 docker run -d --name sql-backup --restart unless-stopped \
   -p 8788:8788 -e TZ=Asia/Shanghai -e SQL_BACKUP_DATA_DIR=/data \
-  -v "$PWD/data:/data" billyshang/sql-backup:v1.0.42
+  -v "$PWD/data:/data" billyshang/sql-backup:v1.0.43
 ```
 
-`data/` 必须整目录持久化（SQLite 与 `secret.key` 不能拆开）。群晖等旧 Docker 请用 `v1.0.42`（linux/amd64，关闭 provenance）：
+`data/` 必须整目录持久化（SQLite 与 `secret.key` 不能拆开）。群晖等旧 Docker 请用 `v1.0.43`（linux/amd64，关闭 provenance）：
 
 ```bash
 docker build --provenance=false --sbom=false --platform linux/amd64 \
-  -t billyshang/sql-backup:v1.0.42 .
+  -t billyshang/sql-backup:v1.0.43 .
 ```
 
 

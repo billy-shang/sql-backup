@@ -36,18 +36,18 @@
       <el-table :data="recent" stripe class="fit-table recent-table" table-layout="fixed" empty-text="暂无备份记录" @row-click="openRecent">
         <el-table-column prop="name" label="连接" show-overflow-tooltip />
         <el-table-column prop="database" label="数据库" show-overflow-tooltip />
-        <el-table-column prop="backup_type" label="类型" width="64">
+        <el-table-column v-if="!compact" prop="backup_type" label="类型" width="64">
           <template #default="{ row }">{{ typeMap[row.backup_type] || row.backup_type }}</template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="80">
+        <el-table-column prop="status" label="状态" :width="narrow ? 72 : 80">
           <template #default="{ row }">
             <el-tag :type="statusType(row.status)" size="small" class="click-tag" :title="row.error_message || ''">{{ statusText(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="file_size" label="大小" width="96">
+        <el-table-column v-if="!compact" prop="file_size" label="大小" width="96">
           <template #default="{ row }">{{ fmtSize(row.file_size) }}</template>
         </el-table-column>
-        <el-table-column prop="started_at" label="时间" width="152">
+        <el-table-column v-if="!narrow" prop="started_at" label="时间" width="152">
           <template #default="{ row }">{{ fmtTimeShort(row.started_at) }}</template>
         </el-table-column>
       </el-table>
@@ -61,8 +61,10 @@ import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import http, { errMsg } from "../api";
 import { fmtSize, fmtTimeShort, isAdmin, statusText, statusType, typeMap } from "../format";
+import { useBreakpoints } from "../useBreakpoints";
 
 const admin = isAdmin();
+const { compact, narrow } = useBreakpoints();
 const router = useRouter();
 const stats = reactive({ connections: 0, schedules: 0, success: 0, failed: 0, running: 0 });
 const recent = ref([]);

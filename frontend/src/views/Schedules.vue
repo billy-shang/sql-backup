@@ -8,16 +8,16 @@
       <el-button v-if="admin" type="primary" @click="openEdit()">新增任务</el-button>
     </div>
     <el-table :data="items" stripe v-loading="loading" class="fit-table" table-layout="fixed" empty-text="暂无定时任务">
-      <el-table-column prop="name" label="任务" show-overflow-tooltip />
-      <el-table-column prop="connection_name" label="连接" show-overflow-tooltip />
-      <el-table-column label="周期" width="128" show-overflow-tooltip>
+      <el-table-column prop="name" label="任务" :min-width="narrow ? 88 : 120" show-overflow-tooltip />
+      <el-table-column prop="connection_name" label="连接" :min-width="narrow ? 88 : 120" show-overflow-tooltip />
+      <el-table-column v-if="!narrow" label="周期" width="128" show-overflow-tooltip>
         <template #default="{ row }">{{ cycleText(row) }}</template>
       </el-table-column>
-      <el-table-column label="类型" width="64">
+      <el-table-column v-if="!compact" label="类型" width="64">
         <template #default="{ row }">{{ typeMap[row.backup_type] }}</template>
       </el-table-column>
-      <el-table-column prop="retain_days" label="保留" width="64" />
-      <el-table-column label="状态" width="90">
+      <el-table-column v-if="!compact" prop="retain_days" label="保留" width="64" />
+      <el-table-column label="状态" :width="narrow ? 72 : 90">
         <template #default="{ row }">
           <el-tag
             :type="statusType(row.last_status)"
@@ -28,20 +28,30 @@
           >{{ statusText(row.last_status) || (row.enabled ? "待运行" : "暂停") }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="上次" width="136">
+      <el-table-column v-if="!narrow" label="上次" width="136">
         <template #default="{ row }">{{ fmtTimeShort(row.last_run_at) }}</template>
       </el-table-column>
-      <el-table-column label="下次" width="136">
+      <el-table-column v-if="!compact" label="下次" width="136">
         <template #default="{ row }">{{ row.enabled ? fmtTimeShort(row.next_run_at) : "—" }}</template>
       </el-table-column>
-      <el-table-column v-if="admin" label="操作" class-name="ops-col" align="left" fixed="right" width="220">
+      <el-table-column v-if="admin" label="操作" class-name="ops-col" align="left" fixed="right" :width="opsWidth">
         <template #default="{ row }">
           <div class="ops-cell">
             <el-button text type="success" @click="runNow(row)">执行</el-button>
-            <el-button v-if="row.enabled" text @click="pause(row)">暂停</el-button>
-            <el-button v-else text type="success" @click="resume(row)">恢复</el-button>
-            <el-button text @click="openEdit(row)">编辑</el-button>
+            <el-button v-if="!narrow && row.enabled" text @click="pause(row)">暂停</el-button>
+            <el-button v-else-if="!narrow" text type="success" @click="resume(row)">恢复</el-button>
+            <el-button v-if="!narrow" text @click="openEdit(row)">编辑</el-button>
             <el-button text type="danger" @click="remove(row)">删除</el-button>
+            <el-dropdown v-if="narrow" trigger="click">
+              <el-button text>更多</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item v-if="row.enabled" @click="pause(row)">暂停</el-dropdown-item>
+                  <el-dropdown-item v-else @click="resume(row)">恢复</el-dropdown-item>
+                  <el-dropdown-item @click="openEdit(row)">编辑</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </template>
       </el-table-column>
@@ -102,8 +112,11 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import http, { errMsg } from "../api";
 import { connOptionLabel, fmtTime, fmtTimeShort, isAdmin, schedMap, statusText, statusType, typeMap, weekMap } from "../format";
+import { useBreakpoints } from "../useBreakpoints";
 
 const admin = isAdmin();
+const { compact, narrow } = useBreakpoints();
+const opsWidth = computed(() => (narrow.value ? 176 : 252));
 const loading = ref(false);
 const saving = ref(false);
 const items = ref([]);
@@ -219,7 +232,11 @@ async function resume(row) {
 }
 
 async function remove(row) {
-  await ElMessageBox.confirm(`删除任务「${row.name}」？`, "删除", { type: "warning" });
+  await ElMessageBox.confirm(
+    `确认删除定时任务「${row.name}」？只删除这条任务，不影响数据库连接和已有备份。`,
+    "删除任务",
+    { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" },
+  );
   try {
     await http.delete(`/schedules/${row.id}`);
     ElMessage.success("已删除");

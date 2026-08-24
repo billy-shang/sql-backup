@@ -6,15 +6,15 @@
         <div class="muted">路径是 SQL Server 本机路径，在「本地备份目录\库名\日期\」子目录中。管理员可从成功记录或目录里的 .bak 恢复到指定库名。</div>
       </div>
         <div class="head-actions">
-          <el-select v-model="filters.connection_id" clearable placeholder="全部连接" style="width:180px" @change="filterChange">
+          <el-select v-model="filters.connection_id" clearable placeholder="全部连接" class="filter-item" @change="filterChange">
             <el-option v-for="c in conns" :key="c.id" :label="connOptionLabel(c)" :value="c.id" />
           </el-select>
-          <el-select v-model="filters.status" clearable placeholder="全部状态" style="width:120px" @change="filterChange">
+          <el-select v-model="filters.status" clearable placeholder="全部状态" class="filter-item filter-status" @change="filterChange">
             <el-option label="成功" value="success" />
             <el-option label="失败" value="failed" />
             <el-option label="运行中" value="running" />
           </el-select>
-          <el-input v-model="filters.q" placeholder="搜索库名/路径" clearable style="width:160px" @keyup.enter="filterChange" @clear="filterChange" />
+          <el-input v-model="filters.q" placeholder="搜索库名/路径" clearable class="filter-item filter-q" @keyup.enter="filterChange" @clear="filterChange" />
           <el-button @click="filterChange">搜索</el-button>
           <el-button @click="openCatalog">浏览目录</el-button>
           <el-button @click="load">刷新</el-button>
@@ -27,28 +27,28 @@
       </div>
     </div>
     <el-table :data="items" stripe v-loading="loading" class="fit-table" table-layout="fixed" empty-text="暂无备份记录">
-      <el-table-column prop="connection_name" label="连接" show-overflow-tooltip />
-      <el-table-column prop="database" label="库名" width="120" show-overflow-tooltip />
-      <el-table-column label="时间" width="152">
+      <el-table-column prop="connection_name" label="连接" :min-width="narrow ? 80 : 110" show-overflow-tooltip />
+      <el-table-column prop="database" label="库名" :width="narrow ? 96 : 120" show-overflow-tooltip />
+      <el-table-column v-if="!narrow" label="时间" width="152">
         <template #default="{ row }">{{ fmtTimeShort(row.started_at) }}</template>
       </el-table-column>
-      <el-table-column label="类型" width="64">
+      <el-table-column v-if="!compact" label="类型" width="64">
         <template #default="{ row }">{{ typeMap[row.backup_type] || row.backup_type }}</template>
       </el-table-column>
-      <el-table-column label="大小" width="96">
+      <el-table-column v-if="!compact" label="大小" width="96">
         <template #default="{ row }">{{ fmtSize(row.file_size) }}</template>
       </el-table-column>
-      <el-table-column label="状态" width="80">
+      <el-table-column label="状态" :width="narrow ? 72 : 80">
         <template #default="{ row }">
           <el-tag :type="statusType(row.status)" size="small" class="click-tag" :title="row.error_message || '点击查看详情'" @click="showError(row)">{{ statusText(row.status) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="路径" show-overflow-tooltip>
+      <el-table-column v-if="!narrow" label="路径" show-overflow-tooltip>
         <template #default="{ row }">
           <span class="path-link" :title="row.file_path ? `${row.file_path}（点击复制）` : ''" @click="copyPath(row.file_path)">{{ fileBaseName(row.file_path) || "—" }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="群晖" show-overflow-tooltip>
+      <el-table-column v-if="!compact" label="群晖" show-overflow-tooltip>
         <template #default="{ row }">
           <span v-if="row.remote_status === 'success'" class="path-link" :title="row.remote_path" @click="copyPath(row.remote_path)">{{ remoteFileName(row) }}</span>
           <span v-else-if="row.remote_status === 'failed'" class="remote-fail">
@@ -58,18 +58,26 @@
           <span v-else>—</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" class-name="ops-col" align="left" fixed="right" :width="admin ? 168 : 72">
+      <el-table-column label="操作" class-name="ops-col" align="left" fixed="right" :width="opsWidth">
         <template #default="{ row }">
           <div class="ops-cell">
             <el-button text type="primary" :disabled="!row.downloadable" @click="download(row)">下载</el-button>
             <el-button
-              v-if="admin"
+              v-if="!narrow && admin"
               text
               type="success"
               :disabled="!canRestore(row)"
               @click="openRestore(row)"
             >恢复</el-button>
             <el-button v-if="admin" text type="danger" @click="remove(row)">删除</el-button>
+            <el-dropdown v-if="narrow && admin" trigger="click">
+              <el-button text>更多</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item :disabled="!canRestore(row)" @click="openRestore(row)">恢复</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </template>
       </el-table-column>
@@ -80,7 +88,8 @@
         v-model:page-size="pageSize"
         :total="total"
         :page-sizes="[10, 20, 50, 100]"
-        layout="total, sizes, prev, pager, next"
+        :small="narrow"
+        :layout="narrow ? 'total, prev, next' : 'total, sizes, prev, pager, next'"
         background
         @current-change="load"
         @size-change="onSizeChange"
@@ -150,10 +159,16 @@ import { useRoute } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import http, { errMsg } from "../api";
 import { connOptionLabel, fileBaseName, fmtSize, fmtTimeShort, isAdmin, statusText, statusType, typeMap } from "../format";
+import { useBreakpoints } from "../useBreakpoints";
 
 const route = useRoute();
+const { compact, narrow } = useBreakpoints();
 
 const admin = isAdmin();
+const opsWidth = computed(() => {
+  if (admin) return narrow.value ? 176 : 188;
+  return 72;
+});
 const loading = ref(false);
 const items = ref([]);
 const conns = ref([]);
@@ -516,10 +531,19 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.filter-item { width: 180px; }
+.filter-status { width: 120px; }
+.filter-q { width: 160px; }
 .pager {
   display: flex;
   justify-content: flex-end;
   padding: 12px 0 0;
+  overflow-x: auto;
+}
+@media (max-width: 899px) {
+  .filter-item,
+  .filter-status,
+  .filter-q { width: 140px; }
 }
 .path-box {
   word-break: break-all;

@@ -11,34 +11,34 @@
       </div>
     </div>
     <el-table :data="items" stripe v-loading="loading" class="fit-table" table-layout="fixed" empty-text="暂无连接">
-      <el-table-column prop="name" label="名称" show-overflow-tooltip />
-      <el-table-column label="地址" width="158" show-overflow-tooltip>
+      <el-table-column prop="name" label="名称" :min-width="narrow ? 88 : 110" show-overflow-tooltip />
+      <el-table-column v-if="!narrow" label="地址" width="158" show-overflow-tooltip>
         <template #default="{ row }">{{ row.host }}:{{ row.port }}</template>
       </el-table-column>
-      <el-table-column label="方式" width="64">
+      <el-table-column v-if="!compact" label="方式" width="64">
         <template #default="{ row }">{{ row.connect_mode === "ssh" ? "SSH" : "直连" }}</template>
       </el-table-column>
-      <el-table-column label="数据库" class-name="db-col" min-width="280">
+      <el-table-column label="数据库" class-name="db-col" :min-width="narrow ? 160 : 240">
         <template #default="{ row }">
           <div class="db-tags">
-            <el-tag
+            <span
               v-for="name in dbTagItems(row)"
               :key="name"
-              size="small"
-              effect="plain"
-              :type="isSystemDb(name) ? 'warning' : 'info'"
-            >{{ name }}</el-tag>
-            <el-tag v-if="!dbTagItems(row).length" size="small" type="success" effect="plain">全部用户库</el-tag>
+              class="db-chip"
+              :class="{ sys: isSystemDb(name) }"
+              :title="name"
+            >{{ name }}</span>
+            <span v-if="!dbTagItems(row).length" class="db-chip all">全部用户库</span>
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="本地备份目录" min-width="140" show-overflow-tooltip>
+      <el-table-column v-if="!narrow" label="本地备份目录" min-width="140" show-overflow-tooltip>
         <template #default="{ row }">{{ row.backup_dir || "实例默认" }}</template>
       </el-table-column>
-      <el-table-column label="群晖归档" width="80">
+      <el-table-column v-if="!compact" label="群晖归档" width="80">
         <template #default="{ row }">{{ row.remote_enabled ? "已开" : "—" }}</template>
       </el-table-column>
-      <el-table-column label="进度" width="150">
+      <el-table-column label="进度" :width="narrow ? 108 : 150">
         <template #default="{ row }">
           <div
             v-if="backupStates[row.id]"
@@ -52,13 +52,22 @@
           <span v-else class="muted">—</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" class-name="ops-col" align="left" fixed="right" :width="admin ? 220 : 108">
+      <el-table-column label="操作" class-name="ops-col" align="left" fixed="right" :width="opsWidth">
         <template #default="{ row }">
           <div class="ops-cell">
             <el-button text type="success" :disabled="backupStates[row.id]?.status === 'running'" @click="openRun(row)">备份</el-button>
-            <el-button text @click="openBackups(row)">记录</el-button>
-            <el-button v-if="admin" text @click="openEdit(row)">编辑</el-button>
+            <el-button v-if="!narrow" text @click="openBackups(row)">记录</el-button>
+            <el-button v-if="!narrow && admin" text @click="openEdit(row)">编辑</el-button>
             <el-button v-if="admin" text type="danger" @click="remove(row)">删除</el-button>
+            <el-dropdown v-if="narrow" trigger="click">
+              <el-button text>更多</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item @click="openBackups(row)">记录</el-dropdown-item>
+                  <el-dropdown-item v-if="admin" @click="openEdit(row)">编辑</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </template>
       </el-table-column>
@@ -70,7 +79,7 @@
       width="720px"
       :close-on-click-modal="false"
     >
-      <el-form :model="form" label-width="128px">
+      <el-form :model="form" :label-width="narrow ? '96px' : '128px'">
         <el-form-item label="名称"><el-input v-model="form.name" placeholder="生产SQLServer" /></el-form-item>
         <el-form-item label="数据库类型">
           <el-select v-model="form.db_type" style="width:100%">
@@ -177,7 +186,7 @@
         </el-table-column>
         <el-table-column prop="username" label="账号" width="90" show-overflow-tooltip />
         <el-table-column prop="remote_dir" label="远程目录" show-overflow-tooltip />
-        <el-table-column label="操作" class-name="ops-col" align="left" width="108">
+        <el-table-column label="操作" class-name="ops-col" align="left" width="120" fixed="right">
           <template #default="{ row }">
             <div class="ops-cell">
               <el-button text @click="openRemoteEdit(row)">编辑</el-button>
@@ -216,15 +225,21 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import http, { errMsg } from "../api";
 import { isAdmin, isSystemDb, parseDbNames } from "../format";
+import { useBreakpoints } from "../useBreakpoints";
 
 const router = useRouter();
+const { compact, narrow } = useBreakpoints();
 
 const admin = isAdmin();
+const opsWidth = computed(() => {
+  if (admin) return narrow.value ? 176 : 252;
+  return narrow.value ? 116 : 108;
+});
 const loading = ref(false);
 const saving = ref(false);
 const testing = ref(false);
@@ -420,9 +435,9 @@ async function save() {
 
 async function remove(row) {
   await ElMessageBox.confirm(
-    `确认删除连接「${row.name}」？其定时任务和备份历史也会一起删掉，SQL Server 本机上的 .bak 不会删。`,
-    "删除",
-    { type: "warning" },
+    `确认删除连接「${row.name}」？将同时删除该连接下的全部定时任务和备份历史。SQL Server 本机上的 .bak 不会删。`,
+    "删除连接",
+    { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" },
   );
   try {
     await http.delete(`/connections/${row.id}`);
@@ -671,6 +686,10 @@ onBeforeUnmount(() => {
   max-height: 240px;
   overflow: auto;
   padding: 4px 0 8px;
+}
+@media (max-width: 720px) {
+  .db-group { grid-template-columns: 1fr; }
+  .db-toolbar { flex-wrap: wrap; }
 }
 .db-group :deep(.el-checkbox) {
   margin: 0;

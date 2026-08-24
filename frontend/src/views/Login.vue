@@ -229,7 +229,9 @@ async function onLogin() {
   color: #8a8f99;
 }
 @media (max-width: 720px) {
+  .login-page { padding: 24px 12px 24px; }
   .hero h1 { font-size: 26px; }
-  .features { grid-template-columns: 1fr; }
+  .login-card { padding: 22px 18px 24px; }
+  .features { grid-template-columns: 1fr; margin-top: 24px; }
 }
 </style>

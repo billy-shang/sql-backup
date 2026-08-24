@@ -1,7 +1,8 @@
 <template>
-  <div class="app-shell">
-    <el-container class="layout">
-      <el-aside width="200px" class="aside">
+  <div class="app-shell" :class="{ 'is-narrow': narrow }">
+    <div v-if="narrow && navOpen" class="nav-mask" @click="navOpen = false"></div>
+    <el-container class="layout" :class="{ 'nav-collapsed': narrow }">
+      <el-aside :width="narrow ? '220px' : '200px'" class="aside" :class="{ drawer: narrow, open: navOpen }">
       <div class="brand">
         <span class="brand-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -9,6 +10,9 @@
           </svg>
         </span>
         <span>SQL Backup</span>
+        <button v-if="narrow" type="button" class="nav-close" aria-label="关闭菜单" @click="navOpen = false">
+          <el-icon><Close /></el-icon>
+        </button>
       </div>
       <el-menu :default-active="route.path" :key="route.path" router class="aside-menu">
         <el-menu-item index="/">
@@ -46,7 +50,12 @@
 
       <el-container class="content-shell">
         <el-header class="header">
-        <div class="title">{{ title }}</div>
+        <div class="header-left">
+          <button v-if="narrow" type="button" class="nav-toggle" aria-label="打开菜单" @click="navOpen = true">
+            <el-icon><Menu /></el-icon>
+          </button>
+          <div class="title">{{ title }}</div>
+        </div>
         <el-dropdown
           trigger="click"
           popper-class="user-menu-popper"
@@ -122,6 +131,7 @@
           <li>SSH：只能 SSH 时走跳板隧道，再连 SQL</li>
           <li>新增/编辑时点「测试」勾选库；系统库默认不勾选</li>
           <li>管理员可配群晖远程备份、从 .bak 恢复数据库；运维可立即备份、下载，不能改连接/任务/用户/恢复</li>
+          <li>删除连接会同时删掉该连接下的定时任务和备份历史；单独删除定时任务不影响连接</li>
         </ul>
       </section>
       <section>
@@ -155,14 +165,18 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, onBeforeUnmount, reactive, ref } from "vue";
+import { computed, nextTick, onMounted, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import http, { errMsg } from "../api";
 import { APP_VERSION, GITHUB_URL } from "../version";
+import { useBreakpoints } from "../useBreakpoints";
 
 const route = useRoute();
 const router = useRouter();
+const { narrow } = useBreakpoints();
+const navOpen = ref(false);
+watch(() => route.path, () => { navOpen.value = false; });
 const appVersion = APP_VERSION;
 const githubUrl = GITHUB_URL;
 const user = JSON.parse(localStorage.getItem("sqlbackup-user") || '{"username":"","role":""}');
@@ -247,8 +261,55 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
 }
-.layout { flex: 1; min-height: 0; overflow: hidden; }
+.layout { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 .content-shell { min-width: 0; }
+.nav-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(15, 23, 42, 0.36);
+}
+.aside.drawer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 50;
+  transform: translateX(-105%);
+  transition: transform 0.2s ease;
+  pointer-events: none;
+}
+.aside.drawer.open {
+  transform: none;
+  box-shadow: 8px 0 24px rgba(15, 23, 42, 0.2);
+  pointer-events: auto;
+}
+.header-left {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+.nav-toggle,
+.nav-close {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: #f3f4f6;
+  color: #334155;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.nav-close {
+  margin-left: auto;
+  background: rgba(255, 255, 255, 0.08);
+  color: #e2e8f0;
+}
+.nav-toggle:hover { background: #e8edf5; }
 .aside {
   display: flex;
   flex-direction: column;
@@ -328,7 +389,10 @@ onBeforeUnmount(() => {
   background: #fff;
   border-bottom: 1px solid #eef0f3;
 }
-.title { font-weight: 650; font-size: 16px; color: #1f2329; }
+.title { font-weight: 650; font-size: 16px; color: #1f2329; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.is-narrow .header { padding: 0 12px; }
+.is-narrow .main { padding: 12px 10px 16px; }
+.is-narrow .role { display: none; }
 .user-btn {
   display: inline-flex;
   align-items: center;
