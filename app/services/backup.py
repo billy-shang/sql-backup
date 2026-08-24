@@ -5,6 +5,7 @@ import io
 import logging
 import os
 import posixpath
+import re
 import socket
 import stat
 import threading
@@ -164,6 +165,10 @@ class _DbCursor:
             return False
         return fn()
 
+    @property
+    def description(self):
+        return getattr(self._cur, "description", None)
+
 
 def _query_instance_info(conn: Any) -> dict[str, Any]:
     """判断 Windows/Linux、默认备份目录、是否支持压缩。"""
@@ -239,6 +244,96 @@ def _resolve_backup_root(configured: str, info: dict[str, Any]) -> str:
     return (configured or "/var/opt/mssql/data").rstrip("/\\")
 
 
+def _assert_backup_allowed(conn: Any, dbname: str, backup_type: str) -> None:
+    """差异要有完整备份；日志备份不能用于 SIMPLE。"""
+    bt = (backup_type or "full").lower()
+    if bt not in {"diff", "log"}:
+        return
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT CAST(recovery_model_desc AS NVARCHAR(60)) FROM sys.databases WHERE name = " + _sql_nv(dbname)
+    )
+    row = cur.fetchone()
+    model = str(row[0] or "").strip().upper() if row else ""
+    log.info("[backup] 库 %s 恢复模式=%s 类型=%s", dbname, model or "?", bt)
+    if bt == "log" and (not model or model == "SIMPLE"):
+        raise RuntimeError(
+            f"数据库 {dbname} 是简单恢复模式（SIMPLE），不能做日志备份。"
+            "请改用完整备份，或把恢复模式改为完整 / 大容量日志。"
+        )
+    if bt != "diff":
+        return
+    last_full = None
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT TOP 1 backup_finish_date FROM msdb.dbo.backupset "
+            f"WHERE database_name = {_sql_nv(dbname)} AND type = N'D' "
+            "AND ISNULL(is_copy_only, 0) = 0 "
+            "ORDER BY backup_finish_date DESC"
+        )
+        row = cur.fetchone()
+        last_full = row[0] if row else None
+    except Exception as e:  # noqa: BLE001
+        log.info("[backup] 带 is_copy_only 查询失败，改试旧写法: %s", e)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT TOP 1 backup_finish_date FROM msdb.dbo.backupset "
+            f"WHERE database_name = {_sql_nv(dbname)} AND type = N'D' "
+            "ORDER BY backup_finish_date DESC"
+        )
+        row = cur.fetchone()
+        last_full = row[0] if row else None
+    if not last_full:
+        raise RuntimeError(f"数据库 {dbname} 还没有完整备份，不能做差异备份。请先做一次完整备份。")
+    log.info("[backup] 库 %s 最近完整备份时间=%s", dbname, last_full)
+
+
+def _assert_disk_space(conn: Any, root: str, need_bytes: int) -> None:
+    """Windows：用 xp_fixeddrives 看备份盘剩余空间。读不到就跳过，不挡备份。"""
+    if not _is_windows_path(root):
+        return
+    drive = root[0].upper()
+    need_mb = max(int(need_bytes / (1024 * 1024) * 1.3) + 200, 300)
+    try:
+        cur = conn.cursor()
+        cur.execute("EXEC master.dbo.xp_fixeddrives")
+        rows = cur.fetchall() or []
+        _drain_cursor(cur)
+    except Exception as e:  # noqa: BLE001
+        log.info("[backup] 无法读取磁盘剩余空间: %s", e)
+        return
+    free = None
+    for row in rows:
+        letter = str(row[0] or "").strip().upper()[:1]
+        if letter == drive:
+            try:
+                free = int(row[1] or 0)
+            except (TypeError, ValueError):
+                free = None
+            break
+    if free is None:
+        log.info("[backup] xp_fixeddrives 没有 %s: 盘", drive)
+        return
+    log.info("[backup] %s: 剩余 %s MB，预估需要 %s MB", drive, free, need_mb)
+    if free < need_mb:
+        raise RuntimeError(
+            f"备份盘 {drive}: 剩余 {free} MB，按上次备份估算至少需要 {need_mb} MB。请先清理磁盘。"
+        )
+
+
+def _verify_backup(conn: Any, disk: str) -> None:
+    """RESTORE VERIFYONLY：文件 SQL Server 自己读得过才算成功。"""
+    cur = conn.cursor()
+    log.info("[backup] 校验备份 %s", disk)
+    try:
+        cur.execute("RESTORE VERIFYONLY FROM DISK = " + _sql_nv(disk))
+        _drain_cursor(cur)
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"备份文件校验失败（VERIFYONLY）：{disk}。{e}") from e
+    log.info("[backup] VERIFYONLY 通过 %s", disk)
+
+
 def _backup_via_odbc(
     dbc: Any,
     *,
@@ -249,6 +344,7 @@ def _backup_via_odbc(
     backup_type: str,
     compress: bool,
 ) -> dict[str, Any]:
+    _assert_backup_allowed(dbc, dbname, backup_type)
     info = _query_instance_info(dbc)
     use_compress = bool(compress) and bool(info.get("compress_ok"))
     if compress and not use_compress:
@@ -258,9 +354,12 @@ def _backup_via_odbc(
     remote_dir = _dir_of(remote_path)
     sql = backup_sql(backup_type, dbname, remote_path.replace("'", "''"), use_compress)
     log.info("[backup] 实际备份路径 %s", remote_path)
+    est = _query_last_backup_size(dbc, dbname) or 200 * 1024 * 1024
+    _assert_disk_space(dbc, root, est)
     started = _now()
     _run_backup_sql(dbc, sql, remote_dir)
     size = _assert_backup_written(dbc, dbname, remote_path, started)
+    _verify_backup(dbc, remote_path)
     return {
         "file_path": remote_path,
         "remote_dir": remote_dir,
@@ -273,7 +372,7 @@ def _backup_via_odbc(
 def backup_sql(backup_type: str, dbname: str, disk: str, compress: bool) -> str:
     bt = (backup_type or "full").lower()
     name = dbname.replace("]", "]]")
-    opts = ["INIT", "NAME = N'sql_backup'"]
+    opts = ["INIT", "CHECKSUM", "NAME = N'sql_backup'"]
     if compress:
         opts.insert(0, "COMPRESSION")
     extra = ", ".join(opts)
@@ -851,6 +950,13 @@ def _drain_cursor(cur: Any) -> None:
 
 def _sql_nv(s: str) -> str:
     return "N'" + (s or "").replace("'", "''") + "'"
+
+
+def _sql_ident(name: str) -> str:
+    return "[" + str(name or "").replace("]", "]]") + "]"
+
+
+_DBNAME_RE = re.compile(r"^[A-Za-z0-9_\u4e00-\u9fff][A-Za-z0-9_\u4e00-\u9fff.\-]{0,127}$")
 
 
 def _dir_chain(path: str) -> list[str]:
@@ -1542,3 +1648,450 @@ def test_connection(conn_row: Any) -> str:
         msg = test_ssh(ssh_host, conn_row.ssh_port, conn_row.ssh_user, ssh_password, conn_row.ssh_key or "")
         return msg
     return test_direct(conn_row.host, conn_row.port, "master", conn_row.username, password)
+
+
+@contextmanager
+def open_sql_session(conn_row: Any, timeout: int = 600):
+    """打开一条到目标 SQL Server 的连接（直连或 SSH 隧道），用完关闭。"""
+    password = decrypt_secret(conn_row.password_enc)
+    mode = (conn_row.connect_mode or "direct").lower()
+    if mode == "ssh":
+        ssh_password = decrypt_secret(conn_row.ssh_password_enc)
+        ssh_host = conn_row.ssh_host or conn_row.host
+        client = _ssh_client(ssh_host, conn_row.ssh_port, conn_row.ssh_user, ssh_password, conn_row.ssh_key or "")
+        try:
+            dest = _tunnel_sql_host(ssh_host, conn_row.host)
+            with _sql_tunnel(client, int(conn_row.port), dest) as local_port:
+                dbc = _sql_connect(
+                    "127.0.0.1",
+                    local_port,
+                    "master",
+                    conn_row.username,
+                    password,
+                    timeout=timeout,
+                    expect_sql_host=conn_row.host,
+                )
+                try:
+                    yield dbc
+                finally:
+                    dbc.close()
+        finally:
+            client.close()
+        return
+    dbc = _sql_connect(
+        conn_row.host,
+        conn_row.port,
+        "master",
+        conn_row.username,
+        password,
+        timeout=timeout,
+        expect_sql_host=conn_row.host,
+    )
+    try:
+        yield dbc
+    finally:
+        dbc.close()
+
+
+def xp_cmdshell_lines(conn: Any, cmd: str) -> list[str]:
+    """执行 xp_cmdshell，返回非空输出行。"""
+    cur = conn.cursor()
+    cur.execute("EXEC master.dbo.xp_cmdshell " + _sql_nv(cmd))
+    lines: list[str] = []
+    try:
+        while True:
+            try:
+                rows = cur.fetchall() or []
+            except Exception:  # noqa: BLE001
+                rows = []
+            for row in rows:
+                if row and row[0] is not None:
+                    text = str(row[0]).rstrip("\r\n")
+                    if text:
+                        lines.append(text)
+            if not cur.nextset():
+                break
+    except Exception:  # noqa: BLE001
+        pass
+    return lines
+
+
+def list_backup_catalog(conn_row: Any) -> list[dict[str, Any]]:
+    """列出 SQL Server 备份目录下的 库 / 日期 / 文件。"""
+    root = (conn_row.backup_dir or "").strip()
+    if not root:
+        raise RuntimeError("该连接未填写备份目录")
+    with open_sql_session(conn_row, timeout=60) as dbc:
+        return _parse_backup_tree(dbc, root)
+
+
+def _parse_backup_tree(conn: Any, root: str) -> list[dict[str, Any]]:
+    cur = conn.cursor()
+    cur.execute(f"EXEC master.sys.xp_dirtree {_sql_nv(root)}, 3, 1")
+    raw: list[tuple[str, int, int]] = []
+    try:
+        while True:
+            try:
+                rows = cur.fetchall() or []
+            except Exception:  # noqa: BLE001
+                rows = []
+            for row in rows:
+                name = str(row[0] or "").strip()
+                depth = int(row[1] or 0)
+                is_file = int(row[2] or 0) if len(row) > 2 else 0
+                if name:
+                    raw.append((name, depth, is_file))
+            if not cur.nextset():
+                break
+    except Exception:  # noqa: BLE001
+        pass
+    dbs: dict[str, dict[str, Any]] = {}
+    cur_db = ""
+    cur_day = ""
+    for name, depth, is_file in raw:
+        if depth == 1 and not is_file:
+            cur_db = name
+            cur_day = ""
+            dbs.setdefault(cur_db, {"database": cur_db, "days": []})
+            continue
+        if not cur_db:
+            continue
+        if depth == 2 and not is_file:
+            cur_day = name
+            days: list[dict[str, Any]] = dbs[cur_db]["days"]
+            if not any(d["name"] == cur_day for d in days):
+                days.append({"name": cur_day, "files": []})
+            continue
+        if is_file and name.lower().endswith(".bak"):
+            day = cur_day if depth >= 3 else ""
+            if depth == 2:
+                day = ""
+                days = dbs[cur_db]["days"]
+                if not any(d["name"] == "" for d in days):
+                    days.append({"name": "", "files": []})
+            folder = _join_backup_path(root, cur_db, day, "").rstrip("/\\") if day else _join_backup_path(root, cur_db, "", "").rstrip("/\\")
+            path = _join_backup_path(root, cur_db, day, name) if day else f"{folder}\\{name}" if _is_windows_path(root) else f"{folder}/{name}"
+            for item in dbs[cur_db]["days"]:
+                if item["name"] == day:
+                    item["files"].append({"name": name, "path": path})
+                    break
+    out = list(dbs.values())
+    for dbitem in out:
+        dbitem["days"].sort(key=lambda x: x["name"], reverse=True)
+    out.sort(key=lambda x: str(x["database"]).lower())
+    log.info("[backup] 目录浏览 %s 共 %s 个库", root, len(out))
+    return out
+
+
+def _safe_filename(name: str) -> str:
+    cleaned = re.sub(r'[<>:"/\\|?*]', "_", name or "file").strip(" .")
+    return cleaned or "file"
+
+
+def _validate_restore_dbname(name: str) -> str:
+    name = (name or "").strip()
+    if not name or not _DBNAME_RE.match(name):
+        raise RuntimeError("目标库名只能含中文、字母、数字、下划线、点和短横线")
+    if is_system_db(name):
+        raise RuntimeError("不能恢复到系统库 master / model / msdb / tempdb")
+    return name
+
+
+def _cursor_row_dict(cur: Any, row: Any) -> dict[str, Any]:
+    desc = getattr(cur, "description", None)
+    if desc and row is not None:
+        names = [str(c[0]) for c in desc]
+        return {names[i]: row[i] for i in range(min(len(names), len(row)))}
+    return {}
+
+
+def _dict_get(data: dict[str, Any], *names: str) -> Any:
+    lower = {str(k).lower(): v for k, v in data.items()}
+    for name in names:
+        if name.lower() in lower:
+            return lower[name.lower()]
+    return None
+
+
+def _as_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _file_type(value: Any) -> str:
+    if value is None:
+        return "D"
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("ascii", "ignore")
+    return str(value).strip().upper()[:1] or "D"
+
+
+def _fmt_sql_dt(value: Any) -> str:
+    if value is None:
+        return ""
+    if hasattr(value, "strftime"):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    return str(value).replace("T", " ")[:19]
+
+
+def _join_os_path(dirpath: str, name: str) -> str:
+    root = (dirpath or "").rstrip("/\\")
+    if not root:
+        return name
+    if _is_windows_path(root) or "\\" in root:
+        return f"{root}\\{name}"
+    return f"{root}/{name}"
+
+
+def _reg_instance_path(cur: Any, value_name: str) -> str:
+    try:
+        cur.execute(
+            "EXEC master.dbo.xp_instance_regread "
+            "N'HKEY_LOCAL_MACHINE', "
+            "N'Software\\Microsoft\\MSSQLServer\\MSSQLServer', "
+            + _sql_nv(value_name)
+        )
+        row = cur.fetchone()
+        if row:
+            data = row[1] if len(row) > 1 else row[0]
+            if data:
+                return str(data).rstrip("\\/")
+    except Exception as e:  # noqa: BLE001
+        log.info("[restore] 读注册表 %s 失败: %s", value_name, e)
+    return ""
+
+
+def _query_default_file_dirs(conn: Any) -> tuple[str, str]:
+    """数据/日志默认目录。2008 R2 没有 InstanceDefaultDataPath，用注册表或 master 文件兜底。"""
+    data_dir, log_dir = "", ""
+    cur = conn.cursor()
+    for prop, slot in (("InstanceDefaultDataPath", "data"), ("InstanceDefaultLogPath", "log")):
+        try:
+            cur.execute(f"SELECT CAST(SERVERPROPERTY('{prop}') AS NVARCHAR(4000))")
+            row = cur.fetchone()
+            if row and row[0]:
+                path = str(row[0]).rstrip("\\/")
+                if slot == "data":
+                    data_dir = path
+                else:
+                    log_dir = path
+        except Exception:  # noqa: BLE001
+            pass
+    if not data_dir:
+        data_dir = _reg_instance_path(cur, "DefaultData")
+    if not log_dir:
+        log_dir = _reg_instance_path(cur, "DefaultLog")
+    if not data_dir or not log_dir:
+        try:
+            cur.execute("SELECT physical_name, type FROM master.sys.master_files WHERE database_id = 1")
+            for row in cur.fetchall() or []:
+                phys = str(row[0] or "")
+                typ = _as_int(row[1])
+                folder = _dir_of(phys)
+                if typ == 0 and not data_dir:
+                    data_dir = folder
+                if typ == 1 and not log_dir:
+                    log_dir = folder
+        except Exception as e:  # noqa: BLE001
+            log.info("[restore] 读 master 文件路径失败: %s", e)
+    log.info("[restore] 默认数据目录=%s 日志目录=%s", data_dir or "?", log_dir or data_dir or "?")
+    return data_dir, log_dir or data_dir
+
+
+def _backup_type_from_header(value: Any) -> str:
+    code = _as_int(value)
+    if code == 2:
+        return "log"
+    if code == 5:
+        return "diff"
+    return "full"
+
+
+def _restore_header(conn: Any, disk: str) -> dict[str, Any]:
+    cur = conn.cursor()
+    log.info("[restore] HEADERONLY %s", disk)
+    cur.execute("RESTORE HEADERONLY FROM DISK = " + _sql_nv(disk))
+    row = cur.fetchone()
+    data = _cursor_row_dict(cur, row) if row else {}
+    _drain_cursor(cur)
+    if not row:
+        raise RuntimeError("无法读取备份头，文件可能不是有效的 .bak，或不在该 SQL Server 本机。")
+    backup_type = _backup_type_from_header(_dict_get(data, "BackupType") if data else None)
+    if not data:
+        backup_type = _backup_type_from_header(row[2] if len(row) > 2 else 1)
+        source = str(row[9] or "").strip() if len(row) > 9 else ""
+        finished = _fmt_sql_dt(row[18] if len(row) > 18 else None)
+    else:
+        source = str(_dict_get(data, "DatabaseName") or "").strip()
+        finished = _fmt_sql_dt(_dict_get(data, "BackupFinishDate") or _dict_get(data, "BackupStartDate"))
+    if not data:
+        data = {"BackupType": row[2] if len(row) > 2 else 1, "DatabaseName": source}
+    log.info("[restore] 备份头 库=%s 类型=%s 完成=%s", source, backup_type, finished)
+    return {
+        "source_database": source,
+        "backup_type": backup_type,
+        "backup_finish": finished,
+        "raw": data,
+    }
+
+
+def _restore_filelist(conn: Any, disk: str) -> list[dict[str, Any]]:
+    cur = conn.cursor()
+    log.info("[restore] FILELISTONLY %s", disk)
+    cur.execute("RESTORE FILELISTONLY FROM DISK = " + _sql_nv(disk))
+    rows = []
+    try:
+        rows = cur.fetchall() or []
+    except Exception:  # noqa: BLE001
+        rows = []
+    files: list[dict[str, Any]] = []
+    for row in rows:
+        data = _cursor_row_dict(cur, row)
+        if data:
+            logical = str(_dict_get(data, "LogicalName") or "").strip()
+            physical = str(_dict_get(data, "PhysicalName") or "").strip()
+            ftype = _file_type(_dict_get(data, "Type"))
+        else:
+            logical = str(row[0] or "").strip() if row else ""
+            physical = str(row[1] or "").strip() if row and len(row) > 1 else ""
+            ftype = _file_type(row[2] if row and len(row) > 2 else "D")
+        if logical:
+            files.append({"logical": logical, "physical": physical, "type": ftype})
+    _drain_cursor(cur)
+    log.info("[restore] 备份内 %s 个文件", len(files))
+    return files
+
+
+def _db_exists(conn: Any, name: str) -> bool:
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM sys.databases WHERE name = " + _sql_nv(name))
+    return bool(cur.fetchone())
+
+
+def _set_db_access(conn: Any, name: str, single: bool) -> None:
+    cur = conn.cursor()
+    mode = "SINGLE_USER WITH ROLLBACK IMMEDIATE" if single else "MULTI_USER"
+    log.info("[restore] ALTER DATABASE %s SET %s", name, mode)
+    cur.execute(f"ALTER DATABASE {_sql_ident(name)} SET {mode}")
+    _drain_cursor(cur)
+
+
+def _build_move_clause(files: list[dict[str, Any]], target_db: str, data_dir: str, log_dir: str) -> list[str]:
+    moves: list[str] = []
+    data_i = 0
+    log_i = 0
+    for item in files:
+        logical = item["logical"]
+        physical = item.get("physical") or ""
+        ftype = item.get("type") or "D"
+        fallback = _dir_of(physical)
+        if ftype == "L":
+            log_i += 1
+            suffix = "" if log_i == 1 else f"_{log_i}"
+            dest = _join_os_path(log_dir or fallback, f"{_safe_filename(target_db)}{suffix}_log.ldf")
+        elif ftype == "S":
+            dest = _join_os_path(data_dir or fallback, _safe_filename(f"{target_db}_{logical}"))
+        else:
+            data_i += 1
+            ext = ".mdf" if data_i == 1 and ftype == "D" else ".ndf"
+            extra = "" if data_i == 1 else f"_{data_i}"
+            dest = _join_os_path(data_dir or fallback, f"{_safe_filename(target_db)}{extra}{ext}")
+        moves.append(f"MOVE {_sql_nv(logical)} TO {_sql_nv(dest)}")
+        log.info("[restore] MOVE %s -> %s", logical, dest)
+    return moves
+
+
+def inspect_backup_file(conn_row: Any, disk: str) -> dict[str, Any]:
+    """读取 .bak 头，给恢复向导预填来源库和类型。"""
+    disk = (disk or "").strip()
+    if not disk:
+        raise RuntimeError("请指定备份文件路径")
+    with open_sql_session(conn_row, timeout=120) as dbc:
+        header = _restore_header(dbc, disk)
+        files = _restore_filelist(dbc, disk)
+    backup_type = header["backup_type"]
+    labels = {"full": "完整", "diff": "差异", "log": "日志"}
+    can_restore = backup_type == "full"
+    reason = "" if can_restore else "当前只支持从完整备份恢复，差异 / 日志请先恢复对应的完整备份。"
+    return {
+        "file_path": disk,
+        "source_database": header["source_database"],
+        "backup_type": backup_type,
+        "backup_type_label": labels.get(backup_type, backup_type),
+        "backup_finish": header["backup_finish"],
+        "can_restore": can_restore,
+        "reason": reason,
+        "files": files,
+    }
+
+
+def restore_database(
+    conn_row: Any,
+    disk: str,
+    target_database: str,
+    *,
+    replace: bool = False,
+    recovery: bool = True,
+) -> dict[str, Any]:
+    """在目标 SQL Server 上执行 RESTORE DATABASE。文件必须在该机本机可见。"""
+    disk = (disk or "").strip()
+    if not disk:
+        raise RuntimeError("请指定备份文件路径")
+    target = _validate_restore_dbname(target_database)
+    log.info("[restore] 开始恢复 file=%s target=%s replace=%s recovery=%s", disk, target, replace, recovery)
+    with open_sql_session(conn_row, timeout=28800) as dbc:
+        header = _restore_header(dbc, disk)
+        if header["backup_type"] != "full":
+            kind = {"diff": "差异", "log": "日志"}.get(header["backup_type"], header["backup_type"])
+            raise RuntimeError(f"当前只支持从完整备份恢复，这份文件是{kind}备份。")
+        source = (header["source_database"] or "").strip()
+        files = _restore_filelist(dbc, disk)
+        if not files:
+            raise RuntimeError("备份里没有数据文件")
+        exists = _db_exists(dbc, target)
+        log.info("[restore] 来源库=%s 目标库=%s 已存在=%s", source, target, exists)
+        if exists and not replace:
+            raise RuntimeError(f"目标库 {target} 已存在。如需覆盖请勾选「覆盖已有库」。")
+        same_name = bool(source) and source.lower() == target.lower()
+        options: list[str] = []
+        if not same_name:
+            data_dir, log_dir = _query_default_file_dirs(dbc)
+            if not data_dir:
+                raise RuntimeError("无法确定目标实例的数据目录，请把库恢复到原库名，或检查 SQL Server 默认路径。")
+            options.extend(_build_move_clause(files, target, data_dir, log_dir))
+        if exists or replace or same_name:
+            options.append("REPLACE")
+        options.append("RECOVERY" if recovery else "NORECOVERY")
+        options.append("STATS = 10")
+        sql = (
+            f"RESTORE DATABASE {_sql_ident(target)} FROM DISK = {_sql_nv(disk)} "
+            f"WITH {', '.join(options)}"
+        )
+        log.info("[restore] 执行 SQL: %s", sql[:500])
+        if exists:
+            _set_db_access(dbc, target, True)
+        cur = dbc.cursor()
+        try:
+            cur.execute(sql)
+            _drain_cursor(cur)
+        except Exception:
+            if exists:
+                try:
+                    _set_db_access(dbc, target, False)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("[restore] 恢复失败后改回 MULTI_USER 失败: %s", e)
+            raise
+        if exists and recovery:
+            try:
+                _set_db_access(dbc, target, False)
+            except Exception as e:  # noqa: BLE001
+                log.info("[restore] 恢复后 MULTI_USER：%s", e)
+    log.info("[restore] 完成 target=%s recovery=%s", target, recovery)
+    return {
+        "target_database": target,
+        "source_database": source,
+        "file_path": disk,
+        "recovery": recovery,
+    }

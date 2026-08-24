@@ -69,6 +69,7 @@
             <el-option label="差异 Differential" value="diff" />
             <el-option label="日志 Log" value="log" />
           </el-select>
+          <div class="muted">差异需要已有完整备份；SIMPLE 恢复模式不能做日志备份。备份后会自动校验。</div>
         </el-form-item>
         <el-form-item label="保留天数">
           <el-input-number v-model="form.retain_days" :min="1" :max="3650" />

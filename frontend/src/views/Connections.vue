@@ -136,6 +136,7 @@
             <el-option label="差异备份 Differential" value="diff" />
             <el-option label="日志备份 Log" value="log" />
           </el-select>
+          <div class="muted">差异需要已有完整备份；SIMPLE 恢复模式不能做日志备份。备份后会自动校验。</div>
         </el-form-item>
         <el-form-item label="保留天数">
           <el-input-number v-model="runForm.retain_days" :min="1" :max="3650" />
@@ -455,6 +456,7 @@ function applyJob(item, toast) {
     current_db: item.current_db || "",
     done: item.done || 0,
     total: item.total || 1,
+    kind: item.kind || "backup",
   };
   if (item.status === "success") {
     stopTimer(cid);
@@ -517,10 +519,11 @@ function finishProgress(cid, status, message) {
 }
 
 function progressText(state) {
+  const verb = state.kind === "restore" ? "恢复" : "备份";
   if (state.status === "success") return "已完成 100%";
-  if (state.status === "failed") return "备份失败";
+  if (state.status === "failed") return state.message || `${verb}失败`;
   if (state.current_db) return `${state.current_db} ${state.percent}%`;
-  return `备份中 ${state.percent}%`;
+  return `${verb}中 ${state.percent}%`;
 }
 
 async function loadRemotes() {

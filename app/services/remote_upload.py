@@ -1,8 +1,10 @@
 """本地备份完成后，把 .bak 上传到已配置的群晖。"""
 from __future__ import annotations
 
+import base64
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -14,16 +16,17 @@ from app.security import decrypt_secret
 from app.services.backup import (
     _is_windows_path,
     _sftp_download,
-    _sql_connect,
-    _sql_tunnel,
-    _ssh_client,
-    _tunnel_sql_host,
+    _sql_temp_enable,
+    open_sql_session,
+    xp_cmdshell_lines,
 )
 from app.services.synology import cleanup_synology_days, test_synology, upload_to_synology
 
 log = logging.getLogger(__name__)
 
-_MAX_SQL_FETCH = 512 * 1024 * 1024
+# 整包 OPENROWSET 只用于小文件，避免 SQL / 容器内存被撑爆
+_MAX_SQL_BLOB = 32 * 1024 * 1024
+_CHUNK = 256 * 1024
 
 
 def _safe_folder(name: str) -> str:
@@ -168,67 +171,91 @@ def _stage_remote_file(conn_row: DbConnection, rec: Any) -> Path | None:
             client.close()
     if _is_windows_path(src):
         size = int(rec.file_size or 0)
-        if 0 < size <= _MAX_SQL_FETCH:
-            try:
-                _fetch_via_sql(conn_row, src, tmp)
-                return tmp
-            except Exception as e:  # noqa: BLE001
-                log.warning("[remote] 经 SQL 读取 bak 失败: %s", e)
-        else:
-            log.warning("[remote] 文件过大或未知大小 size=%s，跳过经 SQL 拉取", size)
+        try:
+            _fetch_via_sql(conn_row, src, tmp, size)
+            return tmp
+        except Exception as e:  # noqa: BLE001
+            log.warning("[remote] 经 SQL 读取 bak 失败: %s", e)
     return None
 
 
-def _fetch_via_sql(conn_row: DbConnection, windows_path: str, dest: Path) -> None:
-    """OPENROWSET 在 SQL Server 本机读文件，经 TDS 传回平台（适合 SSH 隧道场景）。"""
-    password = decrypt_secret(conn_row.password_enc)
+def _fetch_via_sql(conn_row: DbConnection, windows_path: str, dest: Path, size: int = 0) -> None:
+    """从 SQL Server 本机读 .bak：小文件走 OPENROWSET，大文件分块走 xp_cmdshell。"""
+    log.info("[remote] 经 SQL 读取 %s size=%s", windows_path, size)
+    with open_sql_session(conn_row, timeout=8 * 3600) as dbc:
+        if 0 < size <= _MAX_SQL_BLOB:
+            try:
+                _write_bulk(dbc, windows_path, dest)
+                return
+            except Exception as e:  # noqa: BLE001
+                log.info("[remote] OPENROWSET 失败，改分块读取: %s", e)
+        _write_chunked(dbc, windows_path, dest, size)
+
+
+def _write_bulk(dbc: Any, windows_path: str, dest: Path) -> None:
     escaped = windows_path.replace("'", "''")
     sql = f"SELECT BulkColumn FROM OPENROWSET(BULK N'{escaped}', SINGLE_BLOB) AS x"
-    log.info("[remote] 经 SQL 读取 %s", windows_path)
-    mode = (conn_row.connect_mode or "direct").lower()
-    if mode == "ssh":
-        ssh_password = decrypt_secret(conn_row.ssh_password_enc)
-        ssh_host = conn_row.ssh_host or conn_row.host
-        client = _ssh_client(ssh_host, conn_row.ssh_port, conn_row.ssh_user, ssh_password, conn_row.ssh_key or "")
-        try:
-            dest_host = _tunnel_sql_host(ssh_host, conn_row.host)
-            with _sql_tunnel(client, int(conn_row.port), dest_host) as local_port:
-                dbc = _sql_connect(
-                    "127.0.0.1",
-                    local_port,
-                    "master",
-                    conn_row.username,
-                    password,
-                    timeout=600,
-                    expect_sql_host=conn_row.host,
-                )
-                try:
-                    _write_bulk(dbc, sql, dest)
-                finally:
-                    dbc.close()
-        finally:
-            client.close()
-        return
-    dbc = _sql_connect(
-        conn_row.host,
-        conn_row.port,
-        "master",
-        conn_row.username,
-        password,
-        timeout=600,
-        expect_sql_host=conn_row.host,
-    )
-    try:
-        _write_bulk(dbc, sql, dest)
-    finally:
-        dbc.close()
-
-
-def _write_bulk(dbc: Any, sql: str, dest: Path) -> None:
     cur = dbc.cursor()
     cur.execute(sql)
     row = cur.fetchone()
     if not row or row[0] is None:
         raise RuntimeError("OPENROWSET 未返回文件内容（可能未开启 Ad Hoc Distributed Queries）")
     dest.write_bytes(bytes(row[0]))
-    log.info("[remote] 已经 SQL 拉取 %s 字节", dest.stat().st_size)
+    log.info("[remote] 已经 SQL 整包拉取 %s 字节", dest.stat().st_size)
+
+
+def _write_chunked(dbc: Any, windows_path: str, dest: Path, size: int) -> None:
+    """临时打开 xp_cmdshell，用 PowerShell 按块读文件。跳板机看不到 G: 盘。"""
+    with _sql_temp_enable(dbc, "xp_cmdshell") as ok:
+        if not ok:
+            raise RuntimeError(
+                f"文件约 {size} 字节，整包拉取不安全，且无法临时开启 xp_cmdshell 分块读取。"
+                "请确认 SQL 账号是 sysadmin。"
+            )
+        actual = size if size > 0 else _sql_file_length(dbc, windows_path)
+        if actual <= 0:
+            raise RuntimeError(f"无法取得备份文件大小：{windows_path}")
+        log.info("[remote] 分块拉取 %s 共 %s 字节，块=%s", windows_path, actual, _CHUNK)
+        wrote = 0
+        with dest.open("wb") as fh:
+            while wrote < actual:
+                chunk = _sql_read_chunk(dbc, windows_path, wrote, min(_CHUNK, actual - wrote))
+                if not chunk:
+                    break
+                fh.write(chunk)
+                wrote += len(chunk)
+                if wrote == actual or len(chunk) < _CHUNK:
+                    if wrote % (8 * _CHUNK) < _CHUNK:
+                        log.info("[remote] 分块进度 %s / %s", wrote, actual)
+        if wrote <= 0:
+            raise RuntimeError("分块读取未得到数据")
+        log.info("[remote] 分块拉取完成 %s 字节", wrote)
+
+
+def _sql_file_length(dbc: Any, windows_path: str) -> int:
+    p = windows_path.replace("'", "''")
+    cmd = (
+        "powershell.exe -NoProfile -NonInteractive -Command "
+        f"\"$ProgressPreference='SilentlyContinue';(Get-Item -LiteralPath '{p}').Length\""
+    )
+    for line in xp_cmdshell_lines(dbc, cmd):
+        text = line.strip()
+        if text.isdigit():
+            return int(text)
+    return 0
+
+
+def _sql_read_chunk(dbc: Any, windows_path: str, offset: int, length: int) -> bytes:
+    p = windows_path.replace("'", "''")
+    cmd = (
+        "powershell.exe -NoProfile -NonInteractive -Command "
+        "\"$ProgressPreference='SilentlyContinue';"
+        f"$fs=[IO.File]::OpenRead('{p}');$fs.Position={int(offset)};"
+        f"$b=New-Object byte[] {int(length)};$r=$fs.Read($b,0,{int(length)});$fs.Close();"
+        "$s=[Convert]::ToBase64String($b,0,$r);"
+        "for($i=0;$i -lt $s.Length;$i+=240){$s.Substring($i,[Math]::Min(240,$s.Length-$i))}\""
+    )
+    parts = [ln.strip() for ln in xp_cmdshell_lines(dbc, cmd) if re.fullmatch(r"[A-Za-z0-9+/=]+", ln.strip())]
+    if not parts:
+        return b""
+    return base64.b64decode("".join(parts))

@@ -16,8 +16,10 @@ def is_running(cid: int) -> bool:
         return bool(job and job.get("status") == "running")
 
 
-def start_job(cid: int, total: int = 1) -> bool:
+def start_job(cid: int, total: int = 1, kind: str = "backup") -> bool:
     cid = int(cid)
+    kind = "restore" if kind == "restore" else "backup"
+    verb = "恢复" if kind == "restore" else "备份"
     with _lock:
         job = _jobs.get(cid)
         if job and job.get("status") == "running":
@@ -26,15 +28,29 @@ def start_job(cid: int, total: int = 1) -> bool:
         _jobs[cid] = {
             "connection_id": cid,
             "status": "running",
+            "kind": kind,
             "total": max(int(total or 1), 1),
             "done": 0,
             "current_db": "",
             "percent": 1,
-            "message": "正在准备备份",
+            "message": f"正在准备{verb}",
             "started_at": now,
             "db_started_at": now,
         }
         return True
+
+
+def set_message(cid: int, message: str, current_db: str = "") -> None:
+    cid = int(cid)
+    with _lock:
+        job = _jobs.get(cid)
+        if not job or job.get("status") != "running":
+            return
+        if message:
+            job["message"] = message
+        if current_db:
+            job["current_db"] = current_db
+            job["db_started_at"] = time.time()
 
 
 def set_total(cid: int, total: int, current_db: str = "") -> None:
@@ -61,7 +77,8 @@ def mark_db_start(cid: int, name: str, index: int, total: int) -> None:
         job["done"] = max(int(index), 0)
         job["current_db"] = name or ""
         job["db_started_at"] = time.time()
-        job["message"] = f"正在备份 {name}（{index + 1}/{total}）"
+        verb = "恢复" if job.get("kind") == "restore" else "备份"
+        job["message"] = f"正在{verb} {name}（{index + 1}/{total}）"
 
 
 def mark_db_done(cid: int, name: str, done: int, total: int) -> None:
@@ -89,7 +106,8 @@ def finish(cid: int, status: str, message: str) -> None:
         job = _jobs.get(cid) or {"connection_id": cid, "total": 1, "done": 0, "current_db": ""}
         job["status"] = "success" if status == "success" else "failed"
         job["percent"] = 100 if job["status"] == "success" else max(int(job.get("percent") or 0), 8)
-        job["message"] = message or ("备份完成" if job["status"] == "success" else "备份失败")
+        verb = "恢复" if job.get("kind") == "restore" else "备份"
+        job["message"] = message or (f"{verb}完成" if job["status"] == "success" else f"{verb}失败")
         job["finished_at"] = time.time()
         _jobs[cid] = job
 

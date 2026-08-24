@@ -2,18 +2,24 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+import threading
+import time
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from sqlalchemy.orm import Session
 
+from app.db import SessionLocal
 from app.models import Schedule
 from app.services.runner import execute_schedule_job
 
 log = logging.getLogger(__name__)
 TZ = "Asia/Shanghai"
+_TZINFO = ZoneInfo(TZ)
+_CATCHUP_HOURS = 36
 
 scheduler = BackgroundScheduler(timezone=TZ)
 
@@ -87,8 +93,89 @@ def reload_all(db: Session) -> None:
     log.info("[scheduler] 已加载 %s 条定时任务", len(rows))
 
 
+def _aware(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=_TZINFO)
+    return dt.astimezone(_TZINFO)
+
+
+def last_expected_run(sch: Schedule, now: datetime) -> datetime | None:
+    """上一次按计划应该触发的时间（上海时区）。"""
+    now = _aware(now) or datetime.now(_TZINFO)
+    kind = (sch.schedule_type or "daily").lower()
+    if kind == "once":
+        return _aware(sch.once_at)
+    hour, minute = _parse_hm(sch.run_time)
+    candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if kind == "weekly":
+        wd = int(sch.weekday or 0)
+        delta = (candidate.weekday() - wd) % 7
+        if delta == 0 and candidate > now:
+            delta = 7
+        return candidate - timedelta(days=delta)
+    if candidate <= now:
+        return candidate
+    return candidate - timedelta(days=1)
+
+
+def _should_catch_up(sch: Schedule, now: datetime) -> datetime | None:
+    expected = last_expected_run(sch, now)
+    if expected is None:
+        return None
+    if expected > now:
+        return None
+    age = now - expected
+    if age <= timedelta(0) or age > timedelta(hours=_CATCHUP_HOURS):
+        return None
+    last = _aware(sch.last_run_at)
+    if last and last >= expected - timedelta(minutes=2):
+        return None
+    return expected
+
+
+def catch_up_missed(db: Session) -> int:
+    """启动后补跑最近 36 小时内错过的定时任务，避免容器重启当天漏备。"""
+    now = datetime.now(_TZINFO)
+    rows = db.query(Schedule).filter(Schedule.enabled.is_(True)).order_by(Schedule.id).all()
+    by_conn: dict[int, tuple[int, datetime]] = {}
+    for sch in rows:
+        expected = _should_catch_up(sch, now)
+        if expected is None:
+            continue
+        prev = by_conn.get(int(sch.connection_id))
+        if prev is None or expected < prev[1]:
+            by_conn[int(sch.connection_id)] = (sch.id, expected)
+            log.info("[scheduler] 任务 #%s 错过 %s，将补跑", sch.id, expected.strftime("%Y-%m-%d %H:%M"))
+    todo = list(by_conn.values())
+    for sid, expected in todo:
+        try:
+            execute_schedule_job(sid)
+            log.info("[scheduler] 已补跑任务 #%s（原计划 %s）", sid, expected.strftime("%Y-%m-%d %H:%M"))
+        except Exception as e:  # noqa: BLE001
+            log.warning("[scheduler] 补跑任务 #%s 失败: %s", sid, e)
+    if todo:
+        log.info("[scheduler] 补跑结束，共 %s 条", len(todo))
+    else:
+        log.info("[scheduler] 没有需要补跑的定时任务")
+    return len(todo)
+
+
+def _catch_up_async() -> None:
+    time.sleep(5)
+    db = SessionLocal()
+    try:
+        catch_up_missed(db)
+    except Exception as e:  # noqa: BLE001
+        log.warning("[scheduler] 补跑检查失败: %s", e)
+    finally:
+        db.close()
+
+
 def start(db: Session) -> None:
     if not scheduler.running:
         scheduler.start()
         log.info("[scheduler] 调度器已启动")
     reload_all(db)
+    threading.Thread(target=_catch_up_async, name="schedule-catchup", daemon=True).start()

@@ -135,6 +135,15 @@ class BackupRunIn(BaseModel):
     delete_old: bool = True
 
 
+class RestoreIn(BaseModel):
+    connection_id: int
+    backup_id: int | None = None
+    file_path: str = Field(default="", max_length=4000)
+    target_database: str = Field(..., min_length=1, max_length=128)
+    replace: bool = False
+    recovery: bool = True
+
+
 class BackupOut(BaseModel):
     id: int
     connection_id: int
