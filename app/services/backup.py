@@ -1035,31 +1035,120 @@ def _is_expired_day(name: str, retain_days: int) -> bool:
     return (_now().date() - day).days >= max(int(retain_days), 1)
 
 
+def _win_sftp_paths(folder: str) -> list[str]:
+    """Windows OpenSSH 对盘符路径的几种写法。"""
+    raw = (folder or "").strip().rstrip("/\\")
+    if not raw:
+        return []
+    unix = raw.replace("\\", "/")
+    seen: list[str] = []
+    for p in (raw, unix):
+        if p and p not in seen:
+            seen.append(p)
+    if _is_windows_path(raw):
+        drive = raw[0]
+        rest = raw[2:].replace("\\", "/").lstrip("/")
+        for p in (f"/{drive}:/{rest}", f"/{drive}/{rest}", f"/{drive}:/{rest}/"):
+            p = p.rstrip("/") if p.count("/") > 1 else p
+            if p and p not in seen:
+                seen.append(p)
+    return seen
+
+
+def _sftp_rmdir(client: paramiko.SSHClient, folder: str) -> None:
+    """SFTP 删目录（先清文件）。Windows 盘符会试多种路径。"""
+    last: Exception | None = None
+    sftp = client.open_sftp()
+    try:
+        for path in _win_sftp_paths(folder):
+            try:
+                for f in sftp.listdir_attr(path):
+                    child = f"{path.rstrip('/')}\\{f.filename}" if "\\" in path else f"{path.rstrip('/')}/{f.filename}"
+                    if stat.S_ISDIR(f.st_mode or 0):
+                        continue
+                    sftp.remove(child)
+                sftp.rmdir(path)
+                log.info("[backup] SFTP 已删除目录 %s", path)
+                return
+            except FileNotFoundError:
+                last = FileNotFoundError(path)
+                log.info("[backup] SFTP 路径不存在，改试下一种 %s", path)
+            except Exception as e:  # noqa: BLE001
+                last = e
+                log.info("[backup] SFTP 删目录尝试失败 %s: %s", path, e)
+    finally:
+        sftp.close()
+    raise RuntimeError(str(last) if last else f"SFTP 无法删除 {folder}")
+
+
+def _ssh_rmdir(client: paramiko.SSHClient, folder: str) -> None:
+    """用 SSH 删 Windows/Linux 目录，不依赖 xp_cmdshell / OLE。"""
+    raw = (folder or "").strip().rstrip("/\\").replace('"', "")
+    if not raw:
+        return
+    cmds: list[str] = []
+    if _is_windows_path(raw):
+        win = raw.replace("/", "\\")
+        cmds.append(f'cmd.exe /c if exist "{win}" rmdir /s /q "{win}"')
+        cmds.append(
+            "powershell.exe -NoProfile -NonInteractive -Command "
+            f"\"if (Test-Path -LiteralPath '{win}') {{ Remove-Item -LiteralPath '{win}' -Recurse -Force }}\""
+        )
+    else:
+        cmds.append(f"rm -rf {_quote_cmd(raw)}")
+    last: Exception | str | None = None
+    for cmd in cmds:
+        try:
+            code, out, err = _ssh_exec(client, cmd, timeout=90)
+            if code == 0:
+                log.info("[backup] SSH 已删除目录 %s", folder)
+                return
+            last = (err or out or f"exit {code}").strip()
+            log.info("[backup] SSH 删目录未成功 %s: %s", folder, last)
+        except Exception as e:  # noqa: BLE001
+            last = e
+            log.info("[backup] SSH 删目录异常 %s: %s", folder, e)
+    try:
+        _sftp_rmdir(client, folder)
+        return
+    except Exception as e:  # noqa: BLE001
+        last = e
+    raise RuntimeError(f"无法删除目录 {folder}: {last}")
+
+
 def _sftp_cleanup(client: paramiko.SSHClient, remote_root: str, database: str, retain_days: int) -> None:
     if retain_days <= 0:
         return
     db_root = _join_backup_path(remote_root, database, "", "").rstrip("/\\")
+    names: list[str] = []
     sftp = client.open_sftp()
     try:
-        try:
-            days = sftp.listdir_attr(db_root)
-        except FileNotFoundError:
-            return
-        for item in days:
-            name = item.filename
-            if not _is_expired_day(name, retain_days):
-                continue
-            folder = _join_backup_path(remote_root, database, name, "").rstrip("/\\")
+        last: Exception | None = None
+        for path in _win_sftp_paths(db_root) or [db_root]:
             try:
-                for f in sftp.listdir_attr(folder):
-                    if not stat.S_ISDIR(f.st_mode or 0):
-                        sftp.remove(_join_backup_path(remote_root, database, name, f.filename))
-                sftp.rmdir(folder)
-                log.info("[backup] 已删除过期远程目录 %s", folder)
+                names = [item.filename for item in sftp.listdir_attr(path)]
+                last = None
+                break
+            except FileNotFoundError:
+                last = FileNotFoundError(path)
+                continue
             except Exception as e:  # noqa: BLE001
-                log.warning("[backup] 删除远程过期备份失败 %s: %s", folder, e)
+                last = e
+                log.info("[backup] SFTP 列举失败 %s: %s", path, e)
+        if last and not names:
+            log.warning("[backup] SFTP 列举备份目录失败 %s: %s", db_root, last)
+            return
     finally:
         sftp.close()
+    for name in names:
+        if not _is_expired_day(name, retain_days):
+            continue
+        folder = _join_backup_path(remote_root, database, name, "").rstrip("/\\")
+        try:
+            _ssh_rmdir(client, folder)
+            log.info("[backup] 已删除过期远程目录 %s", folder)
+        except Exception as e:  # noqa: BLE001
+            log.warning("[backup] 删除远程过期备份失败 %s: %s", folder, e)
 
 
 def _sql_list_day_folders(conn: Any, db_root: str) -> list[str]:
@@ -1095,6 +1184,7 @@ def _sql_delete_bak_in_folder(conn: Any, folder: str) -> None:
 
 
 def _sql_rmdir(conn: Any, folder: str) -> None:
+    """仅直连模式兜底：多数生产环境会关闭 xp_cmdshell / OLE，失败很正常。"""
     win = folder.replace("/", "\\").replace('"', "")
     cur = conn.cursor()
     try:
@@ -1102,7 +1192,7 @@ def _sql_rmdir(conn: Any, folder: str) -> None:
         _drain_cursor(cur)
         return
     except Exception as e:  # noqa: BLE001
-        log.info("[backup] xp_cmdshell 删目录不可用，尝试 OLE: %s", e)
+        log.info("[backup] xp_cmdshell 已关闭，改试 OLE: %s", e)
     cur = conn.cursor()
     cur.execute(
         "DECLARE @fso int, @ok int; "
@@ -1113,7 +1203,25 @@ def _sql_rmdir(conn: Any, folder: str) -> None:
     _drain_cursor(cur)
 
 
-def _sql_cleanup_old_backups(conn: Any, root: str, database: str, retain_days: int) -> None:
+def _remove_day_folder(folder: str, *, conn: Any, ssh_client: Any = None) -> None:
+    """先删目录里的 .bak，再删空日期文件夹。SSH 优先，避免依赖已关闭的 xp_cmdshell。"""
+    try:
+        _sql_delete_bak_in_folder(conn, folder)
+    except Exception as e:  # noqa: BLE001
+        log.info("[backup] xp_delete_file 删 .bak 失败 %s: %s", folder, e)
+    if ssh_client is not None:
+        _ssh_rmdir(ssh_client, folder)
+        return
+    _sql_rmdir(conn, folder)
+
+
+def _sql_cleanup_old_backups(
+    conn: Any,
+    root: str,
+    database: str,
+    retain_days: int,
+    ssh_client: Any = None,
+) -> None:
     """在 SQL Server 本机删除过期日期目录（D:\\sql_backup\\库名\\YYYY-MM-DD）。"""
     if retain_days <= 0 or not root or not database:
         return
@@ -1138,6 +1246,11 @@ def _sql_cleanup_old_backups(conn: Any, root: str, database: str, retain_days: i
             log.info("[backup] 已按文件日期清理 %s 中早于 %s 的 .bak", db_root, cutoff)
         except Exception as e:  # noqa: BLE001
             log.warning("[backup] 按文件日期清理失败: %s", e)
+        if ssh_client is not None:
+            try:
+                _sftp_cleanup(ssh_client, root, database, retain_days)
+            except Exception as e:  # noqa: BLE001
+                log.warning("[backup] SSH 补清日期目录失败: %s", e)
         return
     if not expired:
         log.info("[backup] 没有超过 %s 天的日期目录", retain_days)
@@ -1145,11 +1258,7 @@ def _sql_cleanup_old_backups(conn: Any, root: str, database: str, retain_days: i
     for name in expired:
         folder = _join_backup_path(root, database, name, "").rstrip("/\\")
         try:
-            _sql_delete_bak_in_folder(conn, folder)
-            try:
-                _sql_rmdir(conn, folder)
-            except Exception as e:  # noqa: BLE001
-                log.warning("[backup] 已删 .bak，但目录未去掉 %s: %s", folder, e)
+            _remove_day_folder(folder, conn=conn, ssh_client=ssh_client)
             log.info("[backup] 已删除 SQL Server 过期备份 %s", folder)
         except Exception as e:  # noqa: BLE001
             log.warning("[backup] 删除 SQL Server 过期备份失败 %s: %s", folder, e)
@@ -1229,7 +1338,13 @@ def run_backup(
                         )
                         if delete_old:
                             try:
-                                _sql_cleanup_old_backups(dbc, result.get("root") or "", dbname, retain_days)
+                                _sql_cleanup_old_backups(
+                                    dbc,
+                                    result.get("root") or "",
+                                    dbname,
+                                    retain_days,
+                                    ssh_client=client,
+                                )
                             except Exception as e:  # noqa: BLE001
                                 log.warning("[backup] SQL Server 清理过期备份失败: %s", e)
                     finally:

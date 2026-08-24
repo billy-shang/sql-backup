@@ -152,11 +152,10 @@ class SynologyClient:
                 if data.get("success"):
                     continue
                 code = (data.get("error") or {}).get("code")
-                # 408/414 已存在；400 常见于共享根不可创建
-                if code in {400, 408, 414, 418} and i == 0:
-                    log.info("[synology] 跳过共享根目录 %s: %s", cur, _err_text(data))
-                    continue
-                if code in {408, 414}:
+                # 408/414 已存在；400 常见于共享根或目录已存在
+                if code in {400, 408, 414, 418}:
+                    if i == 0:
+                        log.info("[synology] 跳过共享根目录 %s: %s", cur, _err_text(data))
                     continue
                 log.info("[synology] 创建目录 %s: %s", cur, _err_text(data))
             except Exception as e:  # noqa: BLE001
