@@ -7,6 +7,7 @@ from app.models import DbConnection, RemoteTarget, Schedule
 from app.schemas import ConnectionIn, ConnectionOut, ConnectionProbeIn
 from app.security import decrypt_secret, encrypt_secret
 from app.services.backup import format_database_label, probe_instance, test_connection
+from app.services import progress as prog
 from app.services import scheduler as sched_svc
 
 router = APIRouter(prefix="/api/connections", tags=["connections"])
@@ -99,6 +100,8 @@ def delete_connection(cid: int, _admin: AdminUser, db: DbSess) -> dict:
     row = db.query(DbConnection).filter(DbConnection.id == cid).one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail="连接不存在")
+    if prog.is_running(cid):
+        raise HTTPException(status_code=409, detail="该连接正在备份或恢复，请稍后再试")
     for sch in db.query(Schedule).filter(Schedule.connection_id == cid).all():
         sched_svc.remove_job(sch.id)
     db.delete(row)

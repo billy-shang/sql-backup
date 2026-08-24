@@ -34,7 +34,7 @@
       <el-table-column label="下次" width="136">
         <template #default="{ row }">{{ row.enabled ? fmtTimeShort(row.next_run_at) : "—" }}</template>
       </el-table-column>
-      <el-table-column v-if="admin" label="操作" class-name="ops-col" width="248">
+      <el-table-column v-if="admin" label="操作" class-name="ops-col" align="left" fixed="right" width="220">
         <template #default="{ row }">
           <div class="ops-cell">
             <el-button text type="success" @click="runNow(row)">执行</el-button>
@@ -50,8 +50,8 @@
     <el-dialog v-model="dlg" :title="form.id ? '编辑任务' : '新增任务'" width="560px" :close-on-click-modal="false">
       <el-form :model="form" label-width="110px">
         <el-form-item label="任务名称"><el-input v-model="form.name" /></el-form-item>
-        <el-form-item label="数据库">
-          <el-select v-model="form.connection_id" style="width:100%">
+        <el-form-item label="连接">
+          <el-select v-model="form.connection_id" style="width:100%" placeholder="选择数据库连接">
             <el-option v-for="c in conns" :key="c.id" :label="connOptionLabel(c)" :value="c.id" />
           </el-select>
         </el-form-item>
@@ -159,7 +159,7 @@ function openEdit(row) {
 
 async function save() {
   if (!form.connection_id) {
-    ElMessage.warning("请选择数据库");
+    ElMessage.warning("请选择连接");
     return;
   }
   saving.value = true;

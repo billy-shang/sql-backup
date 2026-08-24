@@ -42,19 +42,27 @@ export function fmtSize(n) {
   return `${v.toFixed(i === 0 ? 0 : 1)}${units[i]}`;
 }
 
-export function dbLabel(raw) {
-  const names = String(raw || "")
+export function parseDbNames(raw) {
+  return String(raw || "")
     .replace(/;/g, ",")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+export function isSystemDb(name) {
+  return ["master", "tempdb", "model", "msdb"].includes(String(name || "").trim().toLowerCase());
+}
+
+export function dbLabel(raw) {
+  const names = parseDbNames(raw);
   return names.length ? names.join("、") : "全部用户数据库";
 }
 
 export function connOptionLabel(c) {
-  const db = (c && (c.database_label || dbLabel(c.database))) || "全部用户数据库";
   const name = (c && c.name) || "未命名";
-  return db.length > 28 ? `${name}（${db.slice(0, 26)}…）` : `${name}（${db}）`;
+  const host = c && c.host ? `${c.host}${c.port ? `:${c.port}` : ""}` : "";
+  return host ? `${name}（${host}）` : name;
 }
 
 export function isAdmin() {

@@ -4,7 +4,6 @@ import logging
 import os
 import threading
 from datetime import datetime
-from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -23,6 +22,12 @@ from app.services.runner import execute_backup
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/backups", tags=["backups"])
+
+
+def _download_filename(path: str) -> str:
+    """Windows 路径在 Linux 上 Path.name 会整段当文件名。"""
+    s = str(path or "").replace("\\", "/").rstrip("/")
+    return (s.split("/")[-1].strip() if s else "") or "backup.bak"
 
 
 def _downloadable(row: BackupRecord) -> bool:
@@ -307,7 +312,7 @@ def download(bid: int, _user: CurrentUser, db: DbSess) -> FileResponse:
     path = (row.local_path or "").strip() or (row.file_path or "").strip()
     if not path or not os.path.isfile(path):
         raise HTTPException(status_code=400, detail="文件不在本机，无法下载。请使用 SSH 模式备份或把备份目录挂到本机。")
-    return FileResponse(path, filename=Path(path).name, media_type="application/octet-stream")
+    return FileResponse(path, filename=_download_filename(path), media_type="application/octet-stream")
 
 
 @router.delete("/{bid}")

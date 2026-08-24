@@ -111,7 +111,7 @@
       </section>
       <section>
         <h3>备份路径</h3>
-        <p>连接里的「服务器备份目录」填数据库服务器自己的路径，例如 <code>D:\SQL_BACKUP</code>。实际文件在：</p>
+        <p>连接里的「本地备份目录」填 SQL Server 本机路径，例如 <code>G:\sql_backup</code>。实际文件在：</p>
         <pre>{目录}\{库名}\{YYYY-MM-DD}\{库名}_{时间}_{类型}.bak</pre>
         <p>请打开子目录查看，根目录下通常看不到 .bak。</p>
       </section>

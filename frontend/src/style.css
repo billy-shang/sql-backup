@@ -55,20 +55,40 @@ a { color: inherit; }
   word-break: keep-all;
   line-height: 24px;
 }
+.fit-table :deep(.db-col .cell) {
+  white-space: normal !important;
+  overflow: visible;
+  text-overflow: unset;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.db-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 0;
+}
 .fit-table :deep(.ops-col .cell) {
-  overflow: visible !important;
+  overflow: hidden !important;
+  display: flex !important;
+  justify-content: flex-start;
+  align-items: center;
 }
 .ops-cell {
-  display: inline-flex;
+  display: flex;
   flex-wrap: nowrap;
   align-items: center;
+  justify-content: flex-start;
+  gap: 0;
+  width: max-content;
+  max-width: 100%;
   white-space: nowrap;
 }
 .ops-cell :deep(.el-button) {
-  margin-left: 0;
-  margin-right: 0;
-  padding: 0 8px;
+  margin: 0;
+  padding: 0 6px;
   height: 24px;
+  flex: 0 0 auto;
 }
 .ops-cell :deep(.el-button + .el-button) {
   margin-left: 0;

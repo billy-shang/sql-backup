@@ -3,7 +3,7 @@
     <div class="page-head">
       <div>
         <h2>数据库连接</h2>
-        <div class="muted">平台可部署在任意机器。配置好连接后，备份文件写在 SQL Server 所在服务器上，不会写到本平台。</div>
+        <div class="muted">平台可部署在任意机器。备份文件写在 SQL Server 本机的「本地备份目录」，不会写到本平台。</div>
       </div>
       <div class="head-actions">
         <el-button v-if="admin" @click="openRemoteDlg">远程备份配置</el-button>
@@ -18,12 +18,25 @@
       <el-table-column label="方式" width="64">
         <template #default="{ row }">{{ row.connect_mode === "ssh" ? "SSH" : "直连" }}</template>
       </el-table-column>
-      <el-table-column label="数据库" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.database_label || dbLabel(row.database) }}</template>
+      <el-table-column label="数据库" class-name="db-col" min-width="280">
+        <template #default="{ row }">
+          <div class="db-tags">
+            <el-tag
+              v-for="name in dbTagItems(row)"
+              :key="name"
+              size="small"
+              effect="plain"
+              :type="isSystemDb(name) ? 'warning' : 'info'"
+            >{{ name }}</el-tag>
+            <el-tag v-if="!dbTagItems(row).length" size="small" type="success" effect="plain">全部用户库</el-tag>
+          </div>
+        </template>
       </el-table-column>
-      <el-table-column prop="backup_dir" label="备份目录" width="120" show-overflow-tooltip />
-      <el-table-column label="群晖" width="56">
-        <template #default="{ row }">{{ row.remote_enabled ? "是" : "否" }}</template>
+      <el-table-column label="本地备份目录" min-width="140" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.backup_dir || "实例默认" }}</template>
+      </el-table-column>
+      <el-table-column label="群晖归档" width="80">
+        <template #default="{ row }">{{ row.remote_enabled ? "已开" : "—" }}</template>
       </el-table-column>
       <el-table-column label="进度" width="150">
         <template #default="{ row }">
@@ -39,7 +52,7 @@
           <span v-else class="muted">—</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" class-name="ops-col" :width="admin ? 248 : 136">
+      <el-table-column label="操作" class-name="ops-col" align="left" fixed="right" :width="admin ? 220 : 108">
         <template #default="{ row }">
           <div class="ops-cell">
             <el-button text type="success" :disabled="backupStates[row.id]?.status === 'running'" @click="openRun(row)">备份</el-button>
@@ -57,7 +70,7 @@
       width="720px"
       :close-on-click-modal="false"
     >
-      <el-form :model="form" label-width="110px">
+      <el-form :model="form" label-width="128px">
         <el-form-item label="名称"><el-input v-model="form.name" placeholder="生产SQLServer" /></el-form-item>
         <el-form-item label="数据库类型">
           <el-select v-model="form.db_type" style="width:100%">
@@ -95,10 +108,10 @@
             <el-radio value="ssh">SSH 代理（经跳板访问 SQL）</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item label="服务器备份目录">
+        <el-form-item label="本地备份目录">
           <el-input v-model="form.backup_dir" placeholder="留空=SQL Server 默认 Backup 目录" />
           <div class="muted">
-            填 SQL Server 那台机器上的路径，不是本平台路径。留空则用实例默认 Backup 目录。也可指定该机其它盘，例如 D:\TEST。文件在「目录\库名\日期\」子目录里，不会出现在 D:\TEST 根目录。
+            填 SQL Server 本机路径，不是本平台路径。留空则用实例默认 Backup 目录。例如 D:\TEST 或 G:\sql_backup。文件在「目录\库名\日期\」子目录里，根目录通常看不到 .bak。
           </div>
         </el-form-item>
         <el-form-item label="是否远程备份">
@@ -164,7 +177,7 @@
         </el-table-column>
         <el-table-column prop="username" label="账号" width="90" show-overflow-tooltip />
         <el-table-column prop="remote_dir" label="远程目录" show-overflow-tooltip />
-        <el-table-column label="操作" class-name="ops-col" width="140">
+        <el-table-column label="操作" class-name="ops-col" align="left" width="108">
           <template #default="{ row }">
             <div class="ops-cell">
               <el-button text @click="openRemoteEdit(row)">编辑</el-button>
@@ -207,7 +220,7 @@ import { onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import http, { errMsg } from "../api";
-import { dbLabel, isAdmin } from "../format";
+import { isAdmin, isSystemDb, parseDbNames } from "../format";
 
 const router = useRouter();
 
@@ -266,6 +279,10 @@ function emptyForm() {
     ssh_password: "",
     ssh_key: "",
   };
+}
+
+function dbTagItems(row) {
+  return parseDbNames(row && row.database);
 }
 
 const SYSTEM_DBS = new Set(["master", "tempdb", "model", "msdb"]);
@@ -402,7 +419,11 @@ async function save() {
 }
 
 async function remove(row) {
-  await ElMessageBox.confirm(`确认删除连接「${row.name}」？`, "删除", { type: "warning" });
+  await ElMessageBox.confirm(
+    `确认删除连接「${row.name}」？其定时任务和备份历史也会一起删掉，SQL Server 本机上的 .bak 不会删。`,
+    "删除",
+    { type: "warning" },
+  );
   try {
     await http.delete(`/connections/${row.id}`);
     ElMessage.success("已删除");

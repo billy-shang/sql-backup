@@ -3,7 +3,7 @@
     <div class="page-head">
       <div>
         <h2>备份文件与历史</h2>
-        <div class="muted">路径是数据库服务器上的路径，在「备份目录\库名\日期\」子目录中。管理员可从成功记录或目录里的 .bak 恢复到指定库名。</div>
+        <div class="muted">路径是 SQL Server 本机路径，在「本地备份目录\库名\日期\」子目录中。管理员可从成功记录或目录里的 .bak 恢复到指定库名。</div>
       </div>
         <div class="head-actions">
           <el-select v-model="filters.connection_id" clearable placeholder="全部连接" style="width:180px" @change="filterChange">
@@ -58,7 +58,7 @@
           <span v-else>—</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" class-name="ops-col" :width="admin ? 210 : 80">
+      <el-table-column label="操作" class-name="ops-col" align="left" fixed="right" :width="admin ? 168 : 72">
         <template #default="{ row }">
           <div class="ops-cell">
             <el-button text type="primary" :disabled="!row.downloadable" @click="download(row)">下载</el-button>
@@ -87,7 +87,7 @@
       />
     </div>
 
-    <el-dialog v-model="catalogDlg" title="服务器备份目录" width="640px" :close-on-click-modal="false">
+    <el-dialog v-model="catalogDlg" title="本地备份目录" width="640px" :close-on-click-modal="false">
       <el-select v-model="catalogCid" placeholder="选择连接" style="width:100%;margin-bottom:12px" @change="loadCatalog">
         <el-option v-for="c in conns" :key="c.id" :label="connOptionLabel(c)" :value="c.id" />
       </el-select>

@@ -3,7 +3,7 @@
 SQL Server 备份管理平台。平台可部署在任意机器；`.bak` 写在 **SQL Server 所在服务器**，不是本平台。
 
 - 源码：https://github.com/billy-shang/sql-backup
-- 镜像：https://hub.docker.com/r/billyshang/sql-backup （当前 `v1.0.41`）
+- 镜像：https://hub.docker.com/r/billyshang/sql-backup （当前 `v1.0.42`）
 
 ## 功能
 
@@ -14,7 +14,7 @@ SQL Server 备份管理平台。平台可部署在任意机器；`.bak` 写在 *
 - 管理员 / 普通运维
 
 备份路径：`{目录}\{库名}\{YYYY-MM-DD}\{库名}_{时间}_{类型}.bak`  
-连接里的备份目录填 SQL Server 本机路径；请打开子目录查看文件。
+连接里的「本地备份目录」填 SQL Server 本机路径；请打开子目录查看文件。
 
 ## 运行
 
@@ -23,24 +23,22 @@ pip install -r requirements.txt
 python -m app
 ```
 
-打开 http://127.0.0.1:8788 ，默认 `admin` / `admin@123`，登录后立刻改密。浏览器标签与登录页使用同一心跳图标。
-
-概览数字和最近记录可点进去。定时任务能看到下次执行时间，也可立即跑一次。备份失败可点状态看原因，群晖失败可重试，路径可点击复制。清空历史仅管理员可用。
+打开 http://127.0.0.1:8788 ，默认 `admin` / `admin@123`
 
 ## Docker
 
 ```bash
-docker pull billyshang/sql-backup:v1.0.41
+docker pull billyshang/sql-backup:v1.0.42
 docker run -d --name sql-backup --restart unless-stopped \
   -p 8788:8788 -e TZ=Asia/Shanghai -e SQL_BACKUP_DATA_DIR=/data \
-  -v "$PWD/data:/data" billyshang/sql-backup:v1.0.41
+  -v "$PWD/data:/data" billyshang/sql-backup:v1.0.42
 ```
 
-`data/` 必须整目录持久化（SQLite 与 `secret.key` 不能拆开）。群晖等旧 Docker 请用 `v1.0.41`（linux/amd64，关闭 provenance）：
+`data/` 必须整目录持久化（SQLite 与 `secret.key` 不能拆开）。群晖等旧 Docker 请用 `v1.0.42`（linux/amd64，关闭 provenance）：
 
 ```bash
 docker build --provenance=false --sbom=false --platform linux/amd64 \
-  -t billyshang/sql-backup:v1.0.41 .
+  -t billyshang/sql-backup:v1.0.42 .
 ```
 
 
