@@ -27,35 +27,20 @@
       </div>
     </div>
     <el-table :data="items" stripe v-loading="loading" class="fit-table" table-layout="fixed" empty-text="暂无备份记录">
-      <el-table-column prop="connection_name" label="连接" :min-width="narrow ? 80 : 110" show-overflow-tooltip />
-      <el-table-column prop="database" label="库名" :width="narrow ? 96 : 120" show-overflow-tooltip />
-      <el-table-column v-if="!narrow" label="时间" width="152">
+      <el-table-column prop="connection_name" label="连接" :min-width="narrow ? 110 : 150" show-overflow-tooltip />
+      <el-table-column prop="database" label="库名" :min-width="narrow ? 100 : 130" show-overflow-tooltip />
+      <el-table-column label="时间" width="168" min-width="168">
         <template #default="{ row }">{{ fmtTimeShort(row.started_at) }}</template>
       </el-table-column>
-      <el-table-column v-if="!compact" label="类型" width="64">
+      <el-table-column label="类型" width="72" min-width="72">
         <template #default="{ row }">{{ typeMap[row.backup_type] || row.backup_type }}</template>
       </el-table-column>
-      <el-table-column v-if="!compact" label="大小" width="96">
+      <el-table-column v-if="!narrow" label="大小" width="88" min-width="88">
         <template #default="{ row }">{{ fmtSize(row.file_size) }}</template>
       </el-table-column>
-      <el-table-column label="状态" :width="narrow ? 72 : 80">
+      <el-table-column label="状态" width="100" min-width="100">
         <template #default="{ row }">
           <el-tag :type="statusType(row.status)" size="small" class="click-tag" :title="row.error_message || '点击查看详情'" @click="showError(row)">{{ statusText(row.status) }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column v-if="!narrow" label="路径" show-overflow-tooltip>
-        <template #default="{ row }">
-          <span class="path-link" :title="row.file_path ? `${row.file_path}（点击复制）` : ''" @click="copyPath(row.file_path)">{{ fileBaseName(row.file_path) || "—" }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column v-if="!compact" label="群晖" show-overflow-tooltip>
-        <template #default="{ row }">
-          <span v-if="row.remote_status === 'success'" class="path-link" :title="row.remote_path" @click="copyPath(row.remote_path)">{{ remoteFileName(row) }}</span>
-          <span v-else-if="row.remote_status === 'failed'" class="remote-fail">
-            <span :title="row.remote_error" @click="showRemoteError(row)">{{ row.remote_error || "上传失败" }}</span>
-            <el-button text type="primary" @click="retryRemote(row)">重试</el-button>
-          </span>
-          <span v-else>—</span>
         </template>
       </el-table-column>
       <el-table-column label="操作" class-name="ops-col" align="left" :width="opsWidth" :min-width="opsWidth">
@@ -162,7 +147,7 @@ import { connOptionLabel, fileBaseName, fmtSize, fmtTimeShort, isAdmin, statusTe
 import { useBreakpoints } from "../useBreakpoints";
 
 const route = useRoute();
-const { compact, narrow } = useBreakpoints();
+const { narrow } = useBreakpoints();
 
 const admin = isAdmin();
 const opsWidth = computed(() => {

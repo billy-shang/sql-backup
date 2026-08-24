@@ -11,14 +11,14 @@
       </div>
     </div>
     <el-table :data="items" stripe v-loading="loading" class="fit-table" table-layout="fixed" empty-text="暂无连接">
-      <el-table-column prop="name" label="名称" :min-width="narrow ? 88 : 110" show-overflow-tooltip />
-      <el-table-column v-if="!narrow" label="地址" width="158" show-overflow-tooltip>
+      <el-table-column prop="name" label="名称" :min-width="narrow ? 100 : 140" show-overflow-tooltip />
+      <el-table-column v-if="!narrow" label="地址" width="168" min-width="168" show-overflow-tooltip>
         <template #default="{ row }">{{ row.host }}:{{ row.port }}</template>
       </el-table-column>
-      <el-table-column v-if="!compact" label="方式" width="64">
+      <el-table-column v-if="!narrow" label="方式" width="72" min-width="72">
         <template #default="{ row }">{{ row.connect_mode === "ssh" ? "SSH" : "直连" }}</template>
       </el-table-column>
-      <el-table-column label="数据库" class-name="db-col" :min-width="narrow ? 160 : 240">
+      <el-table-column label="数据库" class-name="db-col" :min-width="narrow ? 180 : 280">
         <template #default="{ row }">
           <div class="db-tags">
             <span
@@ -32,13 +32,7 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column v-if="!narrow" label="本地备份目录" min-width="140" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.backup_dir || "实例默认" }}</template>
-      </el-table-column>
-      <el-table-column v-if="!compact" label="群晖归档" width="80">
-        <template #default="{ row }">{{ row.remote_enabled ? "已开" : "—" }}</template>
-      </el-table-column>
-      <el-table-column label="进度" :width="narrow ? 108 : 150">
+      <el-table-column label="进度" :width="narrow ? 120 : 160" :min-width="narrow ? 120 : 160">
         <template #default="{ row }">
           <div
             v-if="backupStates[row.id]"
@@ -233,7 +227,7 @@ import { isAdmin, isSystemDb, parseDbNames } from "../format";
 import { useBreakpoints } from "../useBreakpoints";
 
 const router = useRouter();
-const { compact, narrow } = useBreakpoints();
+const { narrow } = useBreakpoints();
 
 const admin = isAdmin();
 const opsWidth = computed(() => {

@@ -3,7 +3,7 @@
 SQL Server 备份管理平台。平台可部署在任意机器；`.bak` 写在 **SQL Server 所在服务器**，不是本平台。
 
 - 源码：https://github.com/billy-shang/sql-backup
-- 镜像：https://hub.docker.com/r/billyshang/sql-backup （当前 `v1.0.44`）
+- 镜像：https://hub.docker.com/r/billyshang/sql-backup （当前 `v1.0.45`）
 
 ## 功能
 
@@ -23,22 +23,22 @@ pip install -r requirements.txt
 python -m app
 ```
 
-打开 http://127.0.0.1:8788 ，默认 `admin` / `admin@123`。窄屏会收起侧栏、隐藏次要列。各表操作列加宽，删除按钮不再贴边被裁切。删除连接会提示同时删掉对应定时任务。
+打开 http://127.0.0.1:8788 ，默认 `admin` / `admin@123`。列表会按窗口宽度收列：连接页不展示本地备份目录和群晖归档，备份页不展示路径和群晖，定时任务只保留下次备份时间。
 
 ## Docker
 
 ```bash
-docker pull billyshang/sql-backup:v1.0.44
+docker pull billyshang/sql-backup:v1.0.45
 docker run -d --name sql-backup --restart unless-stopped \
   -p 8788:8788 -e TZ=Asia/Shanghai -e SQL_BACKUP_DATA_DIR=/data \
-  -v "$PWD/data:/data" billyshang/sql-backup:v1.0.44
+  -v "$PWD/data:/data" billyshang/sql-backup:v1.0.45
 ```
 
-`data/` 必须整目录持久化（SQLite 与 `secret.key` 不能拆开）。群晖等旧 Docker 请用 `v1.0.44`（linux/amd64，关闭 provenance）：
+`data/` 必须整目录持久化（SQLite 与 `secret.key` 不能拆开）。群晖等旧 Docker 请用 `v1.0.45`（linux/amd64，关闭 provenance）：
 
 ```bash
 docker build --provenance=false --sbom=false --platform linux/amd64 \
-  -t billyshang/sql-backup:v1.0.44 .
+  -t billyshang/sql-backup:v1.0.45 .
 ```
 
 

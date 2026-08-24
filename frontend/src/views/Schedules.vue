@@ -8,16 +8,16 @@
       <el-button v-if="admin" type="primary" @click="openEdit()">新增任务</el-button>
     </div>
     <el-table :data="items" stripe v-loading="loading" class="fit-table" table-layout="fixed" empty-text="暂无定时任务">
-      <el-table-column prop="name" label="任务" :min-width="narrow ? 88 : 120" show-overflow-tooltip />
-      <el-table-column prop="connection_name" label="连接" :min-width="narrow ? 88 : 120" show-overflow-tooltip />
-      <el-table-column v-if="!narrow" label="周期" width="128" show-overflow-tooltip>
+      <el-table-column prop="name" label="任务" :min-width="narrow ? 110 : 140" show-overflow-tooltip />
+      <el-table-column prop="connection_name" label="连接" :min-width="narrow ? 110 : 140" show-overflow-tooltip />
+      <el-table-column v-if="!narrow" label="周期" width="132" min-width="132" show-overflow-tooltip>
         <template #default="{ row }">{{ cycleText(row) }}</template>
       </el-table-column>
-      <el-table-column v-if="!compact" label="类型" width="64">
+      <el-table-column v-if="!narrow" label="类型" width="72" min-width="72">
         <template #default="{ row }">{{ typeMap[row.backup_type] }}</template>
       </el-table-column>
-      <el-table-column v-if="!compact" prop="retain_days" label="保留" width="64" />
-      <el-table-column label="状态" :width="narrow ? 72 : 90">
+      <el-table-column v-if="!narrow" prop="retain_days" label="保留" width="72" min-width="72" />
+      <el-table-column label="状态" width="100" min-width="100">
         <template #default="{ row }">
           <el-tag
             :type="statusType(row.last_status)"
@@ -28,10 +28,7 @@
           >{{ statusText(row.last_status) || (row.enabled ? "待运行" : "暂停") }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column v-if="!narrow" label="上次" width="136">
-        <template #default="{ row }">{{ fmtTimeShort(row.last_run_at) }}</template>
-      </el-table-column>
-      <el-table-column v-if="!compact" label="下次" width="136">
+      <el-table-column label="下次备份时间" width="176" min-width="176">
         <template #default="{ row }">{{ row.enabled ? fmtTimeShort(row.next_run_at) : "—" }}</template>
       </el-table-column>
       <el-table-column v-if="admin" label="操作" class-name="ops-col" align="left" :width="opsWidth" :min-width="opsWidth">
@@ -115,7 +112,7 @@ import { connOptionLabel, fmtTime, fmtTimeShort, isAdmin, schedMap, statusText, 
 import { useBreakpoints } from "../useBreakpoints";
 
 const admin = isAdmin();
-const { compact, narrow } = useBreakpoints();
+const { narrow } = useBreakpoints();
 const opsWidth = computed(() => (narrow.value ? 208 : 288));
 const loading = ref(false);
 const saving = ref(false);
