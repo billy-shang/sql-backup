@@ -23,6 +23,10 @@ class UserCreate(BaseModel):
     role: Literal["admin", "operator"] = "operator"
 
 
+class UserPasswordIn(BaseModel):
+    password: str = Field(..., min_length=6, max_length=128)
+
+
 class UserOut(BaseModel):
     id: int
     username: str
@@ -122,6 +126,7 @@ class ScheduleOut(BaseModel):
     enabled: bool
     last_status: str
     last_run_at: datetime | None = None
+    next_run_at: datetime | None = None
     last_error: str = ""
     created_at: datetime | None = None
 

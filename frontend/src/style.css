@@ -86,6 +86,20 @@ a { color: inherit; }
   padding: 16px 18px;
   min-width: 0;
 }
+.stat-item.clickable {
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.stat-item.clickable:hover {
+  border-color: #c7d7f5;
+  box-shadow: 0 8px 20px rgba(47, 107, 255, 0.08);
+}
+.click-tag { cursor: pointer; }
+.path-link {
+  cursor: pointer;
+  color: #334155;
+}
+.path-link:hover { color: #2f6bff; }
 .stat-item .n {
   font-size: 28px;
   font-weight: 700;

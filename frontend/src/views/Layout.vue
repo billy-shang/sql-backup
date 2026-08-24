@@ -10,7 +10,7 @@
         </span>
         <span>SQL Backup</span>
       </div>
-      <el-menu :default-active="route.path" router class="aside-menu">
+      <el-menu :default-active="route.path" :key="route.path" router class="aside-menu">
         <el-menu-item index="/">
           <el-icon><Odometer /></el-icon>
           <span>概览</span>

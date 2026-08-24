@@ -178,13 +178,13 @@ def _finish_schedule_progress(cid: int, recs: list[BackupRecord]) -> None:
     prog.finish(cid, "success", f"定时备份完成 {len(recs)} 个库")
 
 
-def execute_schedule_job(schedule_id: int) -> None:
+def execute_schedule_job(schedule_id: int, *, ignore_enabled: bool = False) -> None:
     db = SessionLocal()
     cid = 0
     locked = False
     try:
         sch = db.query(Schedule).filter(Schedule.id == schedule_id).one_or_none()
-        if not sch or not sch.enabled:
+        if not sch or (not sch.enabled and not ignore_enabled):
             log.info("[runner] 跳过任务 #%s（不存在或已暂停）", schedule_id)
             return
         cid = int(sch.connection_id)

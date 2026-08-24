@@ -69,7 +69,10 @@ import http, { errMsg } from "../api";
 
 const router = useRouter();
 const loading = ref(false);
-const form = reactive({ username: "", password: "" });
+const form = reactive({
+  username: localStorage.getItem("sqlbackup-last-user") || "",
+  password: "",
+});
 
 async function onLogin() {
   if (!form.username || !form.password) {
@@ -81,6 +84,7 @@ async function onLogin() {
     const { data } = await http.post("/auth/login", form);
     localStorage.setItem("sqlbackup-token", data.token);
     localStorage.setItem("sqlbackup-user", JSON.stringify(data.user));
+    localStorage.setItem("sqlbackup-last-user", form.username);
     ElMessage.success("登录成功");
     router.push("/");
   } catch (e) {

@@ -120,6 +120,24 @@ def last_expected_run(sch: Schedule, now: datetime) -> datetime | None:
     return candidate - timedelta(days=1)
 
 
+def next_expected_run(sch: Schedule, now: datetime | None = None) -> datetime | None:
+    """下一次按计划应该触发的时间（上海时区）。暂停或过期的一次性任务返回空。"""
+    now = _aware(now) or datetime.now(_TZINFO)
+    if not sch.enabled:
+        return None
+    kind = (sch.schedule_type or "daily").lower()
+    if kind == "once":
+        when = _aware(sch.once_at)
+        return when if when and when > now else None
+    last = last_expected_run(sch, now)
+    if last is None:
+        return None
+    if last > now:
+        return last
+    step = timedelta(days=7) if kind == "weekly" else timedelta(days=1)
+    return last + step
+
+
 def _should_catch_up(sch: Schedule, now: datetime) -> datetime | None:
     expected = last_expected_run(sch, now)
     if expected is None:

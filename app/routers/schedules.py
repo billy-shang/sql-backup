@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import logging
+import threading
+
 from fastapi import APIRouter, HTTPException
 
 from app.deps import AdminUser, CurrentUser, DbSess
 from app.models import DbConnection, Schedule
 from app.schemas import ScheduleIn, ScheduleOut
+from app.services import progress as prog
 from app.services import scheduler as sched_svc
 from app.services.backup import format_database_label
+from app.services.runner import execute_schedule_job
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/schedules", tags=["schedules"])
 
@@ -32,6 +39,7 @@ def _to_out(row: Schedule, conn: DbConnection | None) -> ScheduleOut:
         enabled=row.enabled,
         last_status=status,
         last_run_at=row.last_run_at,
+        next_run_at=sched_svc.next_expected_run(row),
         last_error=row.last_error or "",
         created_at=row.created_at,
     )
@@ -113,6 +121,19 @@ def pause_schedule(sid: int, _admin: AdminUser, db: DbSess) -> dict:
     db.refresh(row)
     sched_svc.upsert_job(row)
     return {"ok": True}
+
+
+@router.post("/{sid}/run")
+def run_schedule_now(sid: int, _admin: AdminUser, db: DbSess) -> dict:
+    row = db.query(Schedule).filter(Schedule.id == sid).one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    cid = int(row.connection_id)
+    if prog.is_running(cid):
+        raise HTTPException(status_code=409, detail="该连接正在备份或恢复，请稍后再试")
+    threading.Thread(target=execute_schedule_job, args=(sid,), kwargs={"ignore_enabled": True}, daemon=True).start()
+    log.info("[schedules] 手动执行任务 #%s cid=%s", sid, cid)
+    return {"ok": True, "started": True, "connection_id": cid}
 
 
 @router.post("/{sid}/resume")

@@ -39,10 +39,10 @@
         />
       </el-form-item>
       <el-form-item label="成功时通知">
-        <el-switch v-model="form.notify_on_success" :disabled="!admin" />
+        <el-switch v-model="form.notify_on_success" :disabled="!admin || !form.enabled" />
       </el-form-item>
       <el-form-item label="失败时通知">
-        <el-switch v-model="form.notify_on_fail" :disabled="!admin" />
+        <el-switch v-model="form.notify_on_fail" :disabled="!admin || !form.enabled" />
       </el-form-item>
       <el-form-item>
         <el-button v-if="admin" type="primary" :loading="saving" @click="save">保存</el-button>

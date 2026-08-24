@@ -15,14 +15,28 @@
       <el-table-column label="创建时间" min-width="180">
         <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" class-name="ops-col" width="100">
+      <el-table-column label="操作" class-name="ops-col" width="160">
         <template #default="{ row }">
           <div class="ops-cell">
-            <el-button text type="danger" @click="remove(row)">删除</el-button>
+            <el-button text @click="openReset(row)">重置密码</el-button>
+            <el-button v-if="row.id !== meId" text type="danger" @click="remove(row)">删除</el-button>
           </div>
         </template>
       </el-table-column>
     </el-table>
+
+    <el-dialog v-model="resetDlg" title="重置密码" width="420px" :close-on-click-modal="false">
+      <el-form label-width="80px">
+        <el-form-item label="用户">{{ resetUser.username }}</el-form-item>
+        <el-form-item label="新密码">
+          <el-input v-model="resetPassword" type="password" show-password placeholder="至少 6 位" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="resetDlg = false">取消</el-button>
+        <el-button type="primary" :loading="resetting" @click="saveReset">保存</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="dlg" title="新增用户" width="420px" :close-on-click-modal="false">
       <el-form label-width="80px">
@@ -49,11 +63,22 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import http, { errMsg } from "../api";
 import { fmtTime } from "../format";
 
+const meId = (() => {
+  try {
+    return Number(JSON.parse(localStorage.getItem("sqlbackup-user") || "{}").id || 0);
+  } catch {
+    return 0;
+  }
+})();
 const loading = ref(false);
 const saving = ref(false);
 const items = ref([]);
 const dlg = ref(false);
 const form = reactive({ username: "", password: "", role: "operator" });
+const resetDlg = ref(false);
+const resetting = ref(false);
+const resetUser = reactive({ id: 0, username: "" });
+const resetPassword = ref("");
 
 async function load() {
   loading.value = true;
@@ -85,6 +110,30 @@ async function save() {
     ElMessage.error(errMsg(e));
   } finally {
     saving.value = false;
+  }
+}
+
+function openReset(row) {
+  resetUser.id = row.id;
+  resetUser.username = row.username;
+  resetPassword.value = "";
+  resetDlg.value = true;
+}
+
+async function saveReset() {
+  if ((resetPassword.value || "").trim().length < 6) {
+    ElMessage.warning("新密码至少 6 位");
+    return;
+  }
+  resetting.value = true;
+  try {
+    await http.put(`/users/${resetUser.id}/password`, { password: resetPassword.value });
+    ElMessage.success("密码已重置");
+    resetDlg.value = false;
+  } catch (e) {
+    ElMessage.error(errMsg(e));
+  } finally {
+    resetting.value = false;
   }
 }
 

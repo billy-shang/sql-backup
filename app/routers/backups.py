@@ -17,6 +17,7 @@ from app.schemas import BackupOut, BackupRunIn, RestoreIn
 from app.services import progress as prog
 from app.services.backup import inspect_backup_file, list_backup_catalog, restore_database
 from app.services.notify import notify_backup_result
+from app.services.remote_upload import upload_backup_to_remote
 from app.services.runner import execute_backup
 
 log = logging.getLogger(__name__)
@@ -268,6 +269,34 @@ def backup_progress_all(_user: TokenUser) -> dict:
 def backup_progress(cid: int, _user: TokenUser) -> dict:
     item = prog.get_job(cid)
     return {"ok": True, "item": item}
+
+
+@router.post("/{bid}/retry-remote")
+def retry_remote(bid: int, _user: CurrentUser, db: DbSess) -> dict:
+    row = db.query(BackupRecord).filter(BackupRecord.id == bid).one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="记录不存在")
+    if (row.status or "") != "success":
+        raise HTTPException(status_code=400, detail="只有备份成功的记录才能重新归档")
+    conn = db.query(DbConnection).filter(DbConnection.id == row.connection_id).one_or_none()
+    if not conn:
+        raise HTTPException(status_code=404, detail="连接不存在")
+    if not conn.remote_enabled or not conn.remote_target_id:
+        raise HTTPException(status_code=400, detail="该连接未开启群晖归档")
+    try:
+        log.info("[backups] 重试归档 bid=%s cid=%s", bid, conn.id)
+        remote = upload_backup_to_remote(db, conn, row, retain_days=0, delete_old=False)
+        row.remote_status = "success"
+        row.remote_path = remote or row.remote_path or ""
+        row.remote_error = ""
+        db.commit()
+    except Exception as e:  # noqa: BLE001
+        log.warning("[backups] 重试归档失败 bid=%s: %s", bid, e)
+        row.remote_status = "failed"
+        row.remote_error = str(e)[:500]
+        db.commit()
+        raise HTTPException(status_code=400, detail=str(e)[:500]) from e
+    return {"ok": True, "remote_path": row.remote_path}
 
 
 @router.get("/{bid}/download")

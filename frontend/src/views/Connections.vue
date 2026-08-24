@@ -39,10 +39,11 @@
           <span v-else class="muted">—</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" class-name="ops-col" :width="admin ? 210 : 88">
+      <el-table-column label="操作" class-name="ops-col" :width="admin ? 248 : 136">
         <template #default="{ row }">
           <div class="ops-cell">
             <el-button text type="success" :disabled="backupStates[row.id]?.status === 'running'" @click="openRun(row)">备份</el-button>
+            <el-button text @click="openBackups(row)">记录</el-button>
             <el-button v-if="admin" text @click="openEdit(row)">编辑</el-button>
             <el-button v-if="admin" text type="danger" @click="remove(row)">删除</el-button>
           </div>
@@ -203,9 +204,12 @@
 
 <script setup>
 import { onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import http, { errMsg } from "../api";
 import { dbLabel, isAdmin } from "../format";
+
+const router = useRouter();
 
 const admin = isAdmin();
 const loading = ref(false);
@@ -406,6 +410,10 @@ async function remove(row) {
   } catch (e) {
     ElMessage.error(errMsg(e));
   }
+}
+
+function openBackups(row) {
+  router.push({ path: "/backups", query: { connection_id: String(row.id) } });
 }
 
 function openRun(row) {

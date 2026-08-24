@@ -3,7 +3,7 @@
     <div class="page-head">
       <div>
         <h2>定时任务</h2>
-        <div class="muted">每天 / 每周 / 指定时间执行备份；可暂停与恢复</div>
+        <div class="muted">每天 / 每周 / 指定时间。可立即执行一次，进度在「数据库连接」页查看。</div>
       </div>
       <el-button v-if="admin" type="primary" @click="openEdit()">新增任务</el-button>
     </div>
@@ -19,15 +19,25 @@
       <el-table-column prop="retain_days" label="保留" width="64" />
       <el-table-column label="状态" width="90">
         <template #default="{ row }">
-          <el-tag :type="statusType(row.last_status)" size="small" :title="row.last_error || ''">{{ statusText(row.last_status) || (row.enabled ? "待运行" : "暂停") }}</el-tag>
+          <el-tag
+            :type="statusType(row.last_status)"
+            size="small"
+            class="click-tag"
+            :title="row.last_error || ''"
+            @click="showError(row)"
+          >{{ statusText(row.last_status) || (row.enabled ? "待运行" : "暂停") }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="上次运行" width="152">
+      <el-table-column label="上次" width="136">
         <template #default="{ row }">{{ fmtTimeShort(row.last_run_at) }}</template>
       </el-table-column>
-      <el-table-column v-if="admin" label="操作" class-name="ops-col" width="210">
+      <el-table-column label="下次" width="136">
+        <template #default="{ row }">{{ row.enabled ? fmtTimeShort(row.next_run_at) : "—" }}</template>
+      </el-table-column>
+      <el-table-column v-if="admin" label="操作" class-name="ops-col" width="248">
         <template #default="{ row }">
           <div class="ops-cell">
+            <el-button text type="success" @click="runNow(row)">执行</el-button>
             <el-button v-if="row.enabled" text @click="pause(row)">暂停</el-button>
             <el-button v-else text type="success" @click="resume(row)">恢复</el-button>
             <el-button text @click="openEdit(row)">编辑</el-button>
@@ -171,6 +181,20 @@ async function save() {
     ElMessage.error(errMsg(e));
   } finally {
     saving.value = false;
+  }
+}
+
+function showError(row) {
+  if (!row.last_error) return;
+  ElMessageBox.alert(row.last_error, "最近错误", { confirmButtonText: "知道了" });
+}
+
+async function runNow(row) {
+  try {
+    await http.post(`/schedules/${row.id}/run`);
+    ElMessage.success("已开始执行，进度在「数据库连接」页查看");
+  } catch (e) {
+    ElMessage.error(errMsg(e));
   }
 }
 

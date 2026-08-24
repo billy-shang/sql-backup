@@ -15,9 +15,16 @@
             <el-option label="运行中" value="running" />
           </el-select>
           <el-input v-model="filters.q" placeholder="搜索库名/路径" clearable style="width:160px" @keyup.enter="filterChange" @clear="filterChange" />
+          <el-button @click="filterChange">搜索</el-button>
           <el-button @click="openCatalog">浏览目录</el-button>
           <el-button @click="load">刷新</el-button>
         </div>
+    </div>
+    <div v-if="restoreState" class="restore-prog">
+      <div class="prog-bar" :class="restoreState.status" :title="restoreState.message || ''">
+        <div class="prog-fill" :style="{ width: restoreState.percent + '%' }"></div>
+        <span class="prog-text">{{ restoreProgressText }}</span>
+      </div>
     </div>
     <el-table :data="items" stripe v-loading="loading" class="fit-table" table-layout="fixed" empty-text="暂无备份记录">
       <el-table-column prop="connection_name" label="连接" show-overflow-tooltip />
@@ -33,18 +40,21 @@
       </el-table-column>
       <el-table-column label="状态" width="80">
         <template #default="{ row }">
-          <el-tag :type="statusType(row.status)" size="small" :title="row.error_message || ''">{{ statusText(row.status) }}</el-tag>
+          <el-tag :type="statusType(row.status)" size="small" class="click-tag" :title="row.error_message || '点击查看详情'" @click="showError(row)">{{ statusText(row.status) }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="路径" show-overflow-tooltip>
         <template #default="{ row }">
-          <span :title="row.file_path">{{ fileBaseName(row.file_path) || "—" }}</span>
+          <span class="path-link" :title="row.file_path ? `${row.file_path}（点击复制）` : ''" @click="copyPath(row.file_path)">{{ fileBaseName(row.file_path) || "—" }}</span>
         </template>
       </el-table-column>
       <el-table-column label="群晖" show-overflow-tooltip>
         <template #default="{ row }">
-          <span v-if="row.remote_status === 'success'" :title="row.remote_path">{{ remoteFileName(row) }}</span>
-          <span v-else-if="row.remote_status === 'failed'" style="color:#dc2626" :title="row.remote_error">{{ row.remote_error || "上传失败" }}</span>
+          <span v-if="row.remote_status === 'success'" class="path-link" :title="row.remote_path" @click="copyPath(row.remote_path)">{{ remoteFileName(row) }}</span>
+          <span v-else-if="row.remote_status === 'failed'" class="remote-fail">
+            <span :title="row.remote_error" @click="showRemoteError(row)">{{ row.remote_error || "上传失败" }}</span>
+            <el-button text type="primary" @click="retryRemote(row)">重试</el-button>
+          </span>
           <span v-else>—</span>
         </template>
       </el-table-column>
@@ -64,12 +74,6 @@
         </template>
       </el-table-column>
     </el-table>
-    <div v-if="restoreState" class="restore-prog">
-      <div class="prog-bar" :class="restoreState.status" :title="restoreState.message || ''">
-        <div class="prog-fill" :style="{ width: restoreState.percent + '%' }"></div>
-        <span class="prog-text">{{ restoreProgressText }}</span>
-      </div>
-    </div>
     <div class="pager">
       <el-pagination
         v-model:current-page="page"
@@ -94,8 +98,14 @@
         :props="{ label: 'label', children: 'children' }"
         default-expand-all
         empty-text="该目录下没有日期备份"
-        @node-click="onCatalogNode"
-      />
+      >
+        <template #default="{ data }">
+          <span class="tree-row">
+            <span>{{ data.label }}</span>
+            <el-button v-if="admin && data.path" text type="success" @click.stop="onCatalogNode(data)">恢复</el-button>
+          </span>
+        </template>
+      </el-tree>
     </el-dialog>
 
     <el-dialog v-model="restoreDlg" title="恢复向导" width="560px" :close-on-click-modal="false">
@@ -135,10 +145,13 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import http, { errMsg } from "../api";
 import { connOptionLabel, fileBaseName, fmtSize, fmtTimeShort, isAdmin, statusText, statusType, typeMap } from "../format";
+
+const route = useRoute();
 
 const admin = isAdmin();
 const loading = ref(false);
@@ -321,7 +334,7 @@ async function doRestore() {
     });
     restoreDlg.value = false;
     startRestoreProgress(restoreForm.connection_id, target);
-    ElMessage.success("已开始恢复，进度见页面下方");
+    ElMessage.success("已开始恢复，进度见页面上方");
   } catch (e) {
     ElMessage.error(errMsg(e));
   } finally {
@@ -400,6 +413,38 @@ async function restoreProgressOnLoad() {
   }
 }
 
+function showError(row) {
+  if (!row.error_message) return;
+  ElMessageBox.alert(row.error_message, "失败原因", { confirmButtonText: "知道了" });
+}
+
+function showRemoteError(row) {
+  if (!row.remote_error) return;
+  ElMessageBox.alert(row.remote_error, "群晖归档失败", { confirmButtonText: "知道了" });
+}
+
+async function copyPath(path) {
+  const text = String(path || "").trim();
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    ElMessage.success("路径已复制");
+  } catch {
+    ElMessage.info(text);
+  }
+}
+
+async function retryRemote(row) {
+  try {
+    await http.post(`/backups/${row.id}/retry-remote`);
+    ElMessage.success("群晖归档已完成");
+    load();
+  } catch (e) {
+    ElMessage.error(errMsg(e));
+    load();
+  }
+}
+
 function remoteFileName(row) {
   return fileBaseName(row.remote_path) || "已上传";
 }
@@ -437,7 +482,15 @@ async function remove(row) {
   }
 }
 
+function applyRouteQuery() {
+  const q = route.query || {};
+  if (q.connection_id !== undefined) filters.connection_id = Number(q.connection_id) || null;
+  if (q.status !== undefined) filters.status = String(q.status || "");
+  if (q.q !== undefined) filters.q = String(q.q || "");
+}
+
 onMounted(async () => {
+  applyRouteQuery();
   try {
     const { data } = await http.get("/connections");
     conns.value = data.items || [];
@@ -447,6 +500,15 @@ onMounted(async () => {
   load();
   if (admin) restoreProgressOnLoad();
 });
+
+watch(
+  () => [route.query.connection_id, route.query.status, route.query.q],
+  () => {
+    applyRouteQuery();
+    page.value = 1;
+    load();
+  }
+);
 
 onBeforeUnmount(() => {
   stopRestoreTimer();
@@ -476,7 +538,24 @@ onBeforeUnmount(() => {
   margin-top: 6px;
 }
 .restore-prog {
-  margin-top: 12px;
+  margin: 0 0 12px;
+}
+.remote-fail {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  color: #dc2626;
+  cursor: pointer;
+}
+.remote-fail span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 .prog-bar {
   position: relative;

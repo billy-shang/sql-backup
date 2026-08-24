@@ -5,7 +5,7 @@ import os
 
 from fastapi import APIRouter
 
-from app.deps import CurrentUser, DbSess
+from app.deps import AdminUser, CurrentUser, DbSess
 from app.models import BackupRecord, DbConnection, Schedule
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -29,12 +29,14 @@ def dashboard(_user: CurrentUser, db: DbSess) -> dict:
         items.append(
             {
                 "id": r.id,
+                "connection_id": r.connection_id,
                 "database": (r.dbname or "").strip() or (c.database if c else ""),
                 "name": c.name if c else "",
                 "status": r.status,
                 "backup_type": r.backup_type,
                 "started_at": r.started_at.isoformat() if r.started_at else "",
                 "file_size": r.file_size,
+                "error_message": r.error_message or "",
             }
         )
     return {
@@ -51,7 +53,7 @@ def dashboard(_user: CurrentUser, db: DbSess) -> dict:
 
 
 @router.delete("/logs")
-def clear_logs(_user: CurrentUser, db: DbSess) -> dict:
+def clear_logs(_admin: AdminUser, db: DbSess) -> dict:
     """清空概览备份日志：删除已结束的备份记录，不删数据库服务器上的 .bak。"""
     rows = db.query(BackupRecord).filter(BackupRecord.status != "running").all()
     deleted = 0
