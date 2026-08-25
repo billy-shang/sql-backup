@@ -58,7 +58,7 @@ JWT_EXPIRE_HOURS = int(os.environ.get("SQL_BACKUP_JWT_HOURS", "12"))
 
 DEFAULT_ADMIN_USER = os.environ.get("SQL_BACKUP_ADMIN_USER", "admin")
 DEFAULT_ADMIN_PASS = os.environ.get("SQL_BACKUP_ADMIN_PASS", "admin@123")
-APP_VERSION = os.environ.get("SQL_BACKUP_VERSION", "1.0.45")
+APP_VERSION = os.environ.get("SQL_BACKUP_VERSION", "1.0.46")
 
 
 def ensure_dirs() -> None:

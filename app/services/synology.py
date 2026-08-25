@@ -152,8 +152,8 @@ class SynologyClient:
                 if data.get("success"):
                     continue
                 code = (data.get("error") or {}).get("code")
-                # 408/414 已存在；400 常见于共享根或目录已存在
-                if code in {400, 408, 414, 418}:
+                # 408/414 已存在；400/1100 常见于共享根或目录已存在
+                if code in {400, 408, 414, 418, 1100}:
                     if i == 0:
                         log.info("[synology] 跳过共享根目录 %s: %s", cur, _err_text(data))
                     continue

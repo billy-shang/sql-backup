@@ -26,7 +26,8 @@ log = logging.getLogger(__name__)
 
 # 整包 OPENROWSET 只用于小文件，避免 SQL / 容器内存被撑爆
 _MAX_SQL_BLOB = 32 * 1024 * 1024
-_CHUNK = 256 * 1024
+# 每块一次 PowerShell 冷启动约 10 秒，256KB 会把 800MB 拖成数小时
+_CHUNK = 8 * 1024 * 1024
 
 
 def _safe_folder(name: str) -> str:
@@ -224,9 +225,7 @@ def _write_chunked(dbc: Any, windows_path: str, dest: Path, size: int) -> None:
                     break
                 fh.write(chunk)
                 wrote += len(chunk)
-                if wrote == actual or len(chunk) < _CHUNK:
-                    if wrote % (8 * _CHUNK) < _CHUNK:
-                        log.info("[remote] 分块进度 %s / %s", wrote, actual)
+                log.info("[remote] 分块进度 %s / %s", wrote, actual)
         if wrote <= 0:
             raise RuntimeError("分块读取未得到数据")
         log.info("[remote] 分块拉取完成 %s 字节", wrote)

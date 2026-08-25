@@ -29,6 +29,8 @@ logging.basicConfig(
     encoding="utf-8",
 )
 log = logging.getLogger(__name__)
+logging.getLogger("pytds").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def _migrate() -> None:
