@@ -18,37 +18,24 @@ SQL Server 备份管理平台。平台可部署在任意机器；`.bak` 写在 *
 
 ## 界面
 
-### 概览
-
-![概览](IMAGE/1概览.png)
-
-### 数据库连接
-
-![数据库连接](IMAGE/2数据库连接.png)
-
-### 备份文件
-
-![备份文件](IMAGE/3备份文件.png)
-
-### 定时任务
-
-![定时任务](IMAGE/4定时任务.png)
-
-### 配置中心 · 远程备份（群晖）
-
-![配置中心-群晖](IMAGE/5-1配置中心-群晖.png)
-
-### 配置中心 · SSH 代理
-
-![配置中心-SSH代理](IMAGE/5-2配置中心-SSH代理.png)
-
-### 配置中心 · 通知
-
-![配置中心-通知](IMAGE/5-3配置中心-通知.png)
-
-### 用户管理
-
-![用户管理](IMAGE/6用户管理.png)
+<table>
+  <tr>
+    <td align="center" width="50%"><strong>概览</strong><br/><img src="IMAGE/1概览.png" alt="概览" /></td>
+    <td align="center" width="50%"><strong>数据库连接</strong><br/><img src="IMAGE/2数据库连接.png" alt="数据库连接" /></td>
+  </tr>
+  <tr>
+    <td align="center" width="50%"><strong>备份文件</strong><br/><img src="IMAGE/3备份文件.png" alt="备份文件" /></td>
+    <td align="center" width="50%"><strong>定时任务</strong><br/><img src="IMAGE/4定时任务.png" alt="定时任务" /></td>
+  </tr>
+  <tr>
+    <td align="center" width="50%"><strong>配置中心 · 远程备份（群晖）</strong><br/><img src="IMAGE/5-1配置中心-群晖.png" alt="配置中心-群晖" /></td>
+    <td align="center" width="50%"><strong>配置中心 · SSH 代理</strong><br/><img src="IMAGE/5-2配置中心-SSH代理.png" alt="配置中心-SSH代理" /></td>
+  </tr>
+  <tr>
+    <td align="center" width="50%"><strong>配置中心 · 通知</strong><br/><img src="IMAGE/5-3配置中心-通知.png" alt="配置中心-通知" /></td>
+    <td align="center" width="50%"><strong>用户管理</strong><br/><img src="IMAGE/6用户管理.png" alt="用户管理" /></td>
+  </tr>
+</table>
 
 ## 运行
 
