@@ -18,6 +18,11 @@ SQL Server 备份管理平台。平台可部署在任意机器；`.bak` 写在 *
 
 ## 界面
 
+<p align="center">
+  <strong>登录</strong><br/>
+  <img src="IMAGE/0登录.png" alt="登录" />
+</p>
+
 <table>
   <tr>
     <td align="center" width="50%"><strong>概览</strong><br/><img src="IMAGE/1概览.png" alt="概览" /></td>
