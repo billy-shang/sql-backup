@@ -46,6 +46,7 @@ class ConnectionIn(BaseModel):
     password: str = Field(default="", max_length=256)
     connect_mode: Literal["direct", "ssh"] = "direct"
     backup_dir: str = Field(default="", max_length=512)
+    ssh_proxy_id: int | None = 0
     ssh_host: str = Field(default="", max_length=256)
     ssh_port: int = Field(default=22, ge=1, le=65535)
     ssh_user: str = Field(default="", max_length=128)
@@ -66,6 +67,8 @@ class ConnectionOut(BaseModel):
     has_password: bool = False
     connect_mode: str
     backup_dir: str
+    ssh_proxy_id: int = 0
+    ssh_proxy_name: str = ""
     ssh_host: str
     ssh_port: int
     ssh_user: str
@@ -88,6 +91,7 @@ class ConnectionProbeIn(BaseModel):
     username: str = Field(..., min_length=1, max_length=128)
     password: str = Field(default="", max_length=256)
     connect_mode: Literal["direct", "ssh"] = "direct"
+    ssh_proxy_id: int | None = 0
     ssh_host: str = Field(default="", max_length=256)
     ssh_port: int = Field(default=22, ge=1, le=65535)
     ssh_user: str = Field(default="", max_length=128)
@@ -202,6 +206,28 @@ class RemoteTargetIn(BaseModel):
     username: str = Field(..., min_length=1, max_length=128)
     password: str = Field(default="", max_length=256)
     remote_dir: str = Field(default="/sql_backup", max_length=512)
+
+
+class SshProxyIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    host: str = Field(..., min_length=1, max_length=256)
+    port: int = Field(default=22, ge=1, le=65535)
+    username: str = Field(..., min_length=1, max_length=128)
+    password: str = Field(default="", max_length=256)
+    key: str = Field(default="", max_length=16000)
+
+
+class SshProxyOut(BaseModel):
+    id: int
+    name: str
+    host: str
+    port: int
+    username: str
+    has_password: bool = False
+    has_key: bool = False
+    created_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
 
 
 class RemoteTargetOut(BaseModel):

@@ -16,10 +16,12 @@ from app.security import decrypt_secret
 from app.services.backup import (
     _is_windows_path,
     _sftp_download,
+    _ssh_client,
     _sql_temp_enable,
     open_sql_session,
     xp_cmdshell_lines,
 )
+from app.services.ssh_util import ssh_params
 from app.services.synology import cleanup_synology_days, test_synology, upload_to_synology
 
 log = logging.getLogger(__name__)
@@ -66,10 +68,10 @@ def upload_backup_to_remote(
         return ""
     target = db.query(RemoteTarget).filter(RemoteTarget.id == conn_row.remote_target_id).one_or_none()
     if not target:
-        raise RuntimeError("未找到远程备份配置，请先在「远程备份配置」中添加群晖")
+        raise RuntimeError("未找到远程备份配置，请先在「配置中心」添加群晖")
     password = decrypt_secret(target.password_enc)
     if not password:
-        raise RuntimeError("群晖密码为空，请重新保存远程备份配置")
+        raise RuntimeError("群晖密码为空，请到「配置中心」重新保存")
     filename = _file_basename(rec.file_path or rec.local_path or "backup.bak")
     day = ""
     src_path = rec.file_path or rec.local_path or ""
@@ -159,9 +161,8 @@ def _stage_remote_file(conn_row: DbConnection, rec: Any) -> Path | None:
     tmp.parent.mkdir(parents=True, exist_ok=True)
     mode = (conn_row.connect_mode or "direct").lower()
     if mode == "ssh" and not _is_windows_path(src):
-        ssh_password = decrypt_secret(conn_row.ssh_password_enc)
-        ssh_host = conn_row.ssh_host or conn_row.host
-        client = _ssh_client(ssh_host, conn_row.ssh_port, conn_row.ssh_user, ssh_password, conn_row.ssh_key or "")
+        ssh = ssh_params(conn_row)
+        client = _ssh_client(ssh.host, ssh.port, ssh.user, ssh.password, ssh.key)
         try:
             _sftp_download(client, src, tmp)
             return tmp

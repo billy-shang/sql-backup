@@ -1,3 +1,3 @@
 /** 与 Docker 标签、app.config.APP_VERSION 保持一致。 */
-export const APP_VERSION = "1.0.46";
+export const APP_VERSION = "1.0.47";
 export const GITHUB_URL = "https://github.com/billy-shang/sql-backup";

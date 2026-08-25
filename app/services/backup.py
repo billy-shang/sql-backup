@@ -19,6 +19,7 @@ import paramiko
 
 from app.config import BACKUP_STORE
 from app.security import decrypt_secret
+from app.services.ssh_util import ssh_params
 
 log = logging.getLogger(__name__)
 
@@ -719,14 +720,13 @@ def list_database_items(conn_row: Any) -> list[dict[str, Any]]:
     password = decrypt_secret(conn_row.password_enc)
     mode = (conn_row.connect_mode or "direct").lower()
     if mode == "ssh":
-        ssh_password = decrypt_secret(conn_row.ssh_password_enc)
-        ssh_host = conn_row.ssh_host or conn_row.host
+        ssh = ssh_params(conn_row)
         return _list_dbs_ssh(
-            ssh_host,
-            conn_row.ssh_port,
-            conn_row.ssh_user,
-            ssh_password,
-            conn_row.ssh_key or "",
+            ssh.host,
+            ssh.port,
+            ssh.user,
+            ssh.password,
+            ssh.key,
             conn_row.port,
             conn_row.username,
             password,
@@ -1503,7 +1503,6 @@ def run_backup(
 ) -> dict[str, Any]:
     """备份指定库，返回 file_path / local_path / file_size。"""
     password = decrypt_secret(conn_row.password_enc)
-    ssh_password = decrypt_secret(conn_row.ssh_password_enc)
     day, ts, _when = _stamp()
     dbname = (dbname or "").strip()
     if not dbname:
@@ -1516,13 +1515,13 @@ def run_backup(
     size = 0
     remote_path = ""
     if mode == "ssh":
-        ssh_host = conn_row.ssh_host or conn_row.host
-        client = _ssh_client(ssh_host, conn_row.ssh_port, conn_row.ssh_user, ssh_password, conn_row.ssh_key or "")
+        ssh = ssh_params(conn_row)
+        client = _ssh_client(ssh.host, ssh.port, ssh.user, ssh.password, ssh.key)
         try:
             result: dict[str, Any] | None = None
             last_err: Exception | None = None
             try:
-                with _sql_tunnel(client, int(conn_row.port), _tunnel_sql_host(ssh_host, conn_row.host)) as local_port:
+                with _sql_tunnel(client, int(conn_row.port), _tunnel_sql_host(ssh.host, conn_row.host)) as local_port:
                     log.info("[backup] 经 SSH 隧道执行备份 127.0.0.1:%s", local_port)
                     try:
                         dbc = _sql_connect(
@@ -1643,10 +1642,8 @@ def test_connection(conn_row: Any) -> str:
     password = decrypt_secret(conn_row.password_enc)
     mode = (conn_row.connect_mode or "direct").lower()
     if mode == "ssh":
-        ssh_password = decrypt_secret(conn_row.ssh_password_enc)
-        ssh_host = conn_row.ssh_host or conn_row.host
-        msg = test_ssh(ssh_host, conn_row.ssh_port, conn_row.ssh_user, ssh_password, conn_row.ssh_key or "")
-        return msg
+        ssh = ssh_params(conn_row)
+        return test_ssh(ssh.host, ssh.port, ssh.user, ssh.password, ssh.key)
     return test_direct(conn_row.host, conn_row.port, "master", conn_row.username, password)
 
 
@@ -1656,11 +1653,10 @@ def open_sql_session(conn_row: Any, timeout: int = 600):
     password = decrypt_secret(conn_row.password_enc)
     mode = (conn_row.connect_mode or "direct").lower()
     if mode == "ssh":
-        ssh_password = decrypt_secret(conn_row.ssh_password_enc)
-        ssh_host = conn_row.ssh_host or conn_row.host
-        client = _ssh_client(ssh_host, conn_row.ssh_port, conn_row.ssh_user, ssh_password, conn_row.ssh_key or "")
+        ssh = ssh_params(conn_row)
+        client = _ssh_client(ssh.host, ssh.port, ssh.user, ssh.password, ssh.key)
         try:
-            dest = _tunnel_sql_host(ssh_host, conn_row.host)
+            dest = _tunnel_sql_host(ssh.host, conn_row.host)
             with _sql_tunnel(client, int(conn_row.port), dest) as local_port:
                 dbc = _sql_connect(
                     "127.0.0.1",

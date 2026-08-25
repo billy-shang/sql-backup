@@ -5,7 +5,9 @@
         <h2>定时任务</h2>
         <div class="muted">每天 / 每周 / 指定时间。可立即执行一次，进度在「数据库连接」页查看。</div>
       </div>
-      <el-button v-if="admin" type="primary" @click="openEdit()">新增任务</el-button>
+      <div class="head-actions">
+        <el-button v-if="admin" type="primary" @click="openEdit()">新增任务</el-button>
+      </div>
     </div>
     <el-table :data="items" stripe v-loading="loading" class="fit-table" table-layout="fixed" empty-text="暂无定时任务">
       <el-table-column prop="name" label="任务" :min-width="narrow ? 110 : 140" show-overflow-tooltip />
@@ -28,7 +30,7 @@
           >{{ statusText(row.last_status) || (row.enabled ? "待运行" : "暂停") }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="下次备份时间" width="176" min-width="176">
+      <el-table-column :label="narrow ? '下次' : '下次备份时间'" :width="narrow ? 136 : 176" :min-width="narrow ? 136 : 176">
         <template #default="{ row }">{{ row.enabled ? fmtTimeShort(row.next_run_at) : "—" }}</template>
       </el-table-column>
       <el-table-column v-if="admin" label="操作" class-name="ops-col" align="left" :width="opsWidth" :min-width="opsWidth">
@@ -55,7 +57,7 @@
     </el-table>
 
     <el-dialog v-model="dlg" :title="form.id ? '编辑任务' : '新增任务'" width="560px" :close-on-click-modal="false">
-      <el-form :model="form" label-width="110px">
+      <el-form :model="form" :label-width="narrow ? '88px' : '110px'">
         <el-form-item label="任务名称"><el-input v-model="form.name" /></el-form-item>
         <el-form-item label="连接">
           <el-select v-model="form.connection_id" style="width:100%" placeholder="选择数据库连接">

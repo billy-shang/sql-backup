@@ -15,8 +15,8 @@ from sqlalchemy import inspect, text
 
 from app.config import APP_VERSION, DEFAULT_ADMIN_PASS, DEFAULT_ADMIN_USER, FRONTEND_DIST, HOST, PORT, ensure_dirs, ensure_utf8_stdio
 from app.db import Base, SessionLocal, engine
-from app.models import User  # noqa: F401  # 导入以注册全部表（含 RemoteTarget）
-from app.routers import auth, backups, connections, dashboard, notify, remote, schedules, users
+from app.models import DbConnection, SshProxy, User  # noqa: F401  # 导入以注册全部表
+from app.routers import auth, backups, connections, dashboard, notify, remote, schedules, ssh_proxies, users
 from app.security import hash_password
 from app.services import scheduler as sched_svc
 
@@ -55,6 +55,7 @@ def _migrate() -> None:
         add_col("backup_records", "remote_error", "remote_error TEXT NOT NULL DEFAULT ''")
         add_col("db_connections", "remote_enabled", "remote_enabled BOOLEAN NOT NULL DEFAULT 0")
         add_col("db_connections", "remote_target_id", "remote_target_id INTEGER NOT NULL DEFAULT 0")
+        add_col("db_connections", "ssh_proxy_id", "ssh_proxy_id INTEGER NOT NULL DEFAULT 0")
         add_col("notify_config", "wecom_webhook", "wecom_webhook VARCHAR(1024) NOT NULL DEFAULT ''")
         add_col("notify_config", "dingtalk_webhook", "dingtalk_webhook VARCHAR(1024) NOT NULL DEFAULT ''")
         add_col(
@@ -64,6 +65,50 @@ def _migrate() -> None:
         )
     except Exception as e:  # noqa: BLE001
         log.warning("[boot] 结构迁移跳过: %s", e)
+
+
+def _migrate_inline_ssh(db) -> None:
+    """把旧连接里手填的 SSH 收进配置中心，连接改为引用代理。"""
+    try:
+        rows = db.query(DbConnection).filter(DbConnection.connect_mode == "ssh").all()
+        created = 0
+        reused = 0
+        for row in rows:
+            if int(getattr(row, "ssh_proxy_id", 0) or 0):
+                continue
+            host = (row.ssh_host or row.host or "").strip()
+            user = (row.ssh_user or "").strip()
+            if not host or not user:
+                continue
+            port = int(row.ssh_port or 22)
+            existing = (
+                db.query(SshProxy)
+                .filter(SshProxy.host == host, SshProxy.port == port, SshProxy.username == user)
+                .order_by(SshProxy.id.asc())
+                .first()
+            )
+            if existing:
+                row.ssh_proxy_id = existing.id
+                reused += 1
+                continue
+            proxy = SshProxy(
+                name=f"{row.name} 跳板".strip()[:128] or f"{host} 跳板",
+                host=host,
+                port=port,
+                username=user,
+                password_enc=row.ssh_password_enc or "",
+                key=row.ssh_key or "",
+            )
+            db.add(proxy)
+            db.flush()
+            row.ssh_proxy_id = proxy.id
+            created += 1
+        if created or reused:
+            db.commit()
+            log.info("[boot] 已迁移 SSH 代理：新建 %s，复用 %s", created, reused)
+    except Exception as e:  # noqa: BLE001
+        db.rollback()
+        log.warning("[boot] SSH 代理迁移跳过: %s", e)
 
 
 def _bootstrap() -> None:
@@ -82,6 +127,7 @@ def _bootstrap() -> None:
             )
             db.commit()
             log.info("[boot] 已创建默认管理员 %s", DEFAULT_ADMIN_USER)
+        _migrate_inline_ssh(db)
         sched_svc.start(db)
     finally:
         db.close()
@@ -111,6 +157,7 @@ app.include_router(schedules.router)
 app.include_router(users.router)
 app.include_router(notify.router)
 app.include_router(remote.router)
+app.include_router(ssh_proxies.router)
 app.include_router(dashboard.router)
 
 if FRONTEND_DIST.is_dir():

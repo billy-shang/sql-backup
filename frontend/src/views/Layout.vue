@@ -31,6 +31,10 @@
           <el-icon><Timer /></el-icon>
           <span>定时任务</span>
         </el-menu-item>
+        <el-menu-item v-if="isAdmin" index="/settings">
+          <el-icon><Setting /></el-icon>
+          <span>配置中心</span>
+        </el-menu-item>
         <el-menu-item index="/notify">
           <el-icon><Bell /></el-icon>
           <span>通知管理</span>
@@ -130,13 +134,21 @@
           <li>直连：平台能访问 SQL 端口（通常 1433）时使用</li>
           <li>SSH：只能 SSH 时走跳板隧道，再连 SQL</li>
           <li>新增/编辑时点「测试」勾选库；系统库默认不勾选</li>
-          <li>管理员可配群晖远程备份、从 .bak 恢复数据库；运维可立即备份、下载，不能改连接/任务/用户/恢复</li>
+          <li>管理员在「配置中心」配群晖和 SSH 跳板；新增/编辑连接时选用，不必手填。运维可立即备份、下载，不能改连接/任务/用户/恢复</li>
           <li>删除连接会同时删掉该连接下的定时任务和备份历史；单独删除定时任务不影响连接</li>
         </ul>
       </section>
       <section>
+        <h3>配置中心</h3>
+        <ul>
+          <li>远程备份：群晖 File Station 地址、账号、远程目录</li>
+          <li>SSH 代理：跳板机地址、账号、密码或私钥。多条连接可共用同一跳板</li>
+          <li>新增或编辑连接时，像选群晖一样下拉选择，不必再手填</li>
+        </ul>
+      </section>
+      <section>
         <h3>群晖归档</h3>
-        <p>在「数据库连接」→「远程备份配置」填写 File Station 地址（HTTP 5000 / HTTPS 5001）和远程目录。上传路径为：</p>
+        <p>在「配置中心」→「远程备份」填写 File Station 地址（HTTP 5000 / HTTPS 5001）和远程目录。上传路径为：</p>
         <pre>/fileserver/DB_BackUP/{连接名}/{库名}/{日期}/文件.bak</pre>
         <p>只走 File Station，不走 22 端口。大文件会分块从 SQL Server 读取再上传。</p>
       </section>
@@ -187,6 +199,7 @@ const titles = {
   "/connections": "数据库连接",
   "/backups": "备份文件",
   "/schedules": "定时任务",
+  "/settings": "配置中心",
   "/notify": "通知管理",
   "/users": "用户管理",
 };

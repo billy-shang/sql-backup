@@ -5,11 +5,13 @@
         <h2>用户管理</h2>
         <div class="muted">管理员拥有全部权限；普通运维可查看、执行备份、下载，不能改配置</div>
       </div>
-      <el-button type="primary" @click="open()">新增用户</el-button>
+      <div class="head-actions">
+        <el-button type="primary" @click="open()">新增用户</el-button>
+      </div>
     </div>
     <el-table :data="items" stripe v-loading="loading" class="fit-table" table-layout="fixed" empty-text="暂无用户">
       <el-table-column prop="username" label="用户名" :min-width="narrow ? 100 : 160" />
-      <el-table-column label="角色" :min-width="narrow ? 88 : 120">
+      <el-table-column label="角色" :width="narrow ? 88 : 120" :min-width="narrow ? 88 : 120">
         <template #default="{ row }">{{ row.role === "admin" ? "管理员" : "普通运维" }}</template>
       </el-table-column>
       <el-table-column v-if="!narrow" label="创建时间" min-width="180">

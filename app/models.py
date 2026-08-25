@@ -1,4 +1,4 @@
-"""系统表：用户、数据库连接、定时任务、备份记录、通知配置。"""
+"""系统表：用户、数据库连接、定时任务、备份记录、通知、远程备份、SSH 代理。"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -39,6 +39,7 @@ class DbConnection(Base):
     backup_dir: Mapped[str] = mapped_column(String(512), nullable=False, default="/backup/sqlserver")
     remote_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     remote_target_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ssh_proxy_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     ssh_host: Mapped[str] = mapped_column(String(256), nullable=False, default="")
     ssh_port: Mapped[int] = mapped_column(Integer, nullable=False, default=22)
     ssh_user: Mapped[str] = mapped_column(String(128), nullable=False, default="")
@@ -127,4 +128,19 @@ class RemoteTarget(Base):
     username: Mapped[str] = mapped_column(String(128), nullable=False)
     password_enc: Mapped[str] = mapped_column(Text, nullable=False, default="")
     remote_dir: Mapped[str] = mapped_column(String(512), nullable=False, default="/sql_backup")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class SshProxy(Base):
+    """配置中心的 SSH 跳板：连接里只选，不再手填。"""
+
+    __tablename__ = "ssh_proxies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    host: Mapped[str] = mapped_column(String(256), nullable=False)
+    port: Mapped[int] = mapped_column(Integer, nullable=False, default=22)
+    username: Mapped[str] = mapped_column(String(128), nullable=False)
+    password_enc: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    key: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

@@ -19,7 +19,7 @@ a { color: inherit; }
 }
 .page-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 14px;
@@ -164,12 +164,74 @@ a { color: inherit; }
 .el-dialog {
   max-width: calc(100vw - 24px);
 }
+.el-dialog .el-select,
+.el-dialog .el-date-editor,
+.el-dialog .el-time-picker {
+  width: 100%;
+}
+.pair-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.pair-row .grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.pair-row .port {
+  flex: 0 0 128px;
+  width: 128px;
+}
+.pair-row .port.el-input-number,
+.el-form-item .pair-row .el-input-number {
+  width: 128px;
+}
+.select-with-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.select-with-add .el-select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.select-with-add .el-button {
+  flex: 0 0 auto;
+}
+.tab-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.tab-toolbar .muted {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+}
 
 @media (max-width: 899px) {
   .page-card { padding: 12px 12px; }
   .page-head { margin-bottom: 10px; }
-  .page-head .muted { display: none; }
+  .page-head .muted,
+  .tab-toolbar .muted { display: none; }
   .page-head h2 { font-size: 16px; }
   .stat-item { padding: 12px 14px; }
   .stat-item .n { font-size: 22px; }
+  .pair-row { flex-wrap: wrap; }
+  .pair-row .port,
+  .pair-row .port.el-input-number,
+  .el-form-item .pair-row .el-input-number {
+    flex: 1 1 100%;
+    width: 100%;
+  }
 }

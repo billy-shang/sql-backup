@@ -5,20 +5,22 @@
         <h2>备份文件与历史</h2>
         <div class="muted">路径是 SQL Server 本机路径，在「本地备份目录\库名\日期\」子目录中。管理员可从成功记录或目录里的 .bak 恢复到指定库名。</div>
       </div>
-        <div class="head-actions">
-          <el-select v-model="filters.connection_id" clearable placeholder="全部连接" class="filter-item" @change="filterChange">
-            <el-option v-for="c in conns" :key="c.id" :label="connOptionLabel(c)" :value="c.id" />
-          </el-select>
-          <el-select v-model="filters.status" clearable placeholder="全部状态" class="filter-item filter-status" @change="filterChange">
-            <el-option label="成功" value="success" />
-            <el-option label="失败" value="failed" />
-            <el-option label="运行中" value="running" />
-          </el-select>
-          <el-input v-model="filters.q" placeholder="搜索库名/路径" clearable class="filter-item filter-q" @keyup.enter="filterChange" @clear="filterChange" />
-          <el-button @click="filterChange">搜索</el-button>
-          <el-button @click="openCatalog">浏览目录</el-button>
-          <el-button @click="load">刷新</el-button>
-        </div>
+      <div class="head-actions">
+        <el-button @click="openCatalog">浏览目录</el-button>
+        <el-button @click="load">刷新</el-button>
+      </div>
+    </div>
+    <div class="filter-bar">
+      <el-select v-model="filters.connection_id" clearable placeholder="全部连接" class="filter-item" @change="filterChange">
+        <el-option v-for="c in conns" :key="c.id" :label="connOptionLabel(c)" :value="c.id" />
+      </el-select>
+      <el-select v-model="filters.status" clearable placeholder="全部状态" class="filter-item filter-status" @change="filterChange">
+        <el-option label="成功" value="success" />
+        <el-option label="失败" value="failed" />
+        <el-option label="运行中" value="running" />
+      </el-select>
+      <el-input v-model="filters.q" placeholder="搜索库名/路径" clearable class="filter-item filter-q" @keyup.enter="filterChange" @clear="filterChange" />
+      <el-button type="primary" @click="filterChange">搜索</el-button>
     </div>
     <div v-if="restoreState" class="restore-prog">
       <div class="prog-bar" :class="restoreState.status" :title="restoreState.message || ''">
@@ -29,7 +31,7 @@
     <el-table :data="items" stripe v-loading="loading" class="fit-table" table-layout="fixed" empty-text="暂无备份记录">
       <el-table-column prop="connection_name" label="连接" :min-width="narrow ? 110 : 150" show-overflow-tooltip />
       <el-table-column prop="database" label="库名" :min-width="narrow ? 100 : 130" show-overflow-tooltip />
-      <el-table-column label="时间" width="168" min-width="168">
+      <el-table-column v-if="!narrow" label="时间" width="168" min-width="168">
         <template #default="{ row }">{{ fmtTimeShort(row.started_at) }}</template>
       </el-table-column>
       <el-table-column label="类型" width="72" min-width="72">
@@ -55,11 +57,12 @@
               @click="openRestore(row)"
             >恢复</el-button>
             <el-button v-if="admin" text type="danger" @click="remove(row)">删除</el-button>
-            <el-dropdown v-if="narrow && admin" trigger="click">
+            <el-dropdown v-if="admin && (narrow || row.remote_status === 'failed')" trigger="click">
               <el-button text>更多</el-button>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item :disabled="!canRestore(row)" @click="openRestore(row)">恢复</el-dropdown-item>
+                  <el-dropdown-item v-if="narrow" :disabled="!canRestore(row)" @click="openRestore(row)">恢复</el-dropdown-item>
+                  <el-dropdown-item v-if="row.remote_status === 'failed'" @click="retryRemote(row)">重试归档</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
@@ -516,9 +519,9 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.filter-item { width: 180px; }
+.filter-item { width: 200px; }
 .filter-status { width: 120px; }
-.filter-q { width: 160px; }
+.filter-q { width: 200px; flex: 1 1 200px; }
 .pager {
   display: flex;
   justify-content: flex-end;

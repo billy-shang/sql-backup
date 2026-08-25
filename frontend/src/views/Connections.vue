@@ -6,7 +6,6 @@
         <div class="muted">平台可部署在任意机器。备份文件写在 SQL Server 本机的「本地备份目录」，不会写到本平台。</div>
       </div>
       <div class="head-actions">
-        <el-button v-if="admin" @click="openRemoteDlg">远程备份配置</el-button>
         <el-button v-if="admin" type="primary" @click="openEdit()">新增连接</el-button>
       </div>
     </div>
@@ -80,8 +79,12 @@
             <el-option label="SQL Server" value="sqlserver" />
           </el-select>
         </el-form-item>
-        <el-form-item label="地址"><el-input v-model="form.host" placeholder="192.168.1.10" /></el-form-item>
-        <el-form-item label="端口"><el-input-number v-model="form.port" :min="1" :max="65535" /></el-form-item>
+        <el-form-item label="地址">
+          <div class="pair-row">
+            <el-input class="grow" v-model="form.host" placeholder="192.168.1.10" />
+            <el-input-number class="port" v-model="form.port" :min="1" :max="65535" controls-position="right" />
+          </div>
+        </el-form-item>
         <el-form-item label="数据库名">
           <div v-if="!dbOptions.length" class="muted">
             默认为全部用户数据库，可留空。点击「测试」后会列出全部库；系统库会标注，默认不勾选。
@@ -107,9 +110,10 @@
         </el-form-item>
         <el-form-item label="连接方式">
           <el-radio-group v-model="form.connect_mode">
-            <el-radio value="direct">直连（平台能访问 SQL 端口）</el-radio>
-            <el-radio value="ssh">SSH 代理（经跳板访问 SQL）</el-radio>
+            <el-radio value="direct">直连</el-radio>
+            <el-radio value="ssh">SSH 代理</el-radio>
           </el-radio-group>
+          <div class="muted">直连要求平台能访问 SQL 端口；SSH 经配置中心的跳板再连。</div>
         </el-form-item>
         <el-form-item label="本地备份目录">
           <el-input v-model="form.backup_dir" placeholder="留空=SQL Server 默认 Backup 目录" />
@@ -121,27 +125,78 @@
           <el-switch v-model="form.remote_enabled" />
         </el-form-item>
         <el-form-item v-if="form.remote_enabled" label="远程备份">
-          <el-select v-model="form.remote_target_id" placeholder="选择群晖配置" style="width:100%" clearable>
-            <el-option v-for="t in remotes" :key="t.id" :label="`${t.name}（${t.host}）`" :value="t.id" />
-          </el-select>
-          <div class="muted">本地备份完成后，把 .bak 上传到所选群晖的远程目录。</div>
+          <div class="select-with-add">
+            <el-select v-model="form.remote_target_id" placeholder="选择群晖配置" clearable>
+              <el-option v-for="t in remotes" :key="t.id" :label="`${t.name}（${t.host}）`" :value="t.id" />
+            </el-select>
+            <el-button @click="openQuickRemote">新增</el-button>
+          </div>
+          <div class="muted">备份完成后把 .bak 上传到所选群晖。</div>
         </el-form-item>
-        <template v-if="form.connect_mode === 'ssh'">
-          <el-form-item label="SSH 地址"><el-input v-model="form.ssh_host" /></el-form-item>
-          <el-form-item label="SSH 端口"><el-input-number v-model="form.ssh_port" :min="1" :max="65535" /></el-form-item>
-          <el-form-item label="SSH 用户"><el-input v-model="form.ssh_user" /></el-form-item>
-          <el-form-item label="SSH 密码">
-            <el-input v-model="form.ssh_password" type="password" show-password placeholder="与密钥二选一" />
-          </el-form-item>
-          <el-form-item label="SSH 密钥">
-            <el-input v-model="form.ssh_key" type="textarea" :rows="4" placeholder="私钥内容，优先于密码" />
-          </el-form-item>
-        </template>
+        <el-form-item v-if="form.connect_mode === 'ssh'" label="SSH 代理">
+          <div class="select-with-add">
+            <el-select v-model="form.ssh_proxy_id" placeholder="选择 SSH 跳板" clearable>
+              <el-option v-for="p in proxies" :key="p.id" :label="`${p.name}（${p.username}@${p.host}:${p.port}）`" :value="p.id" />
+            </el-select>
+            <el-button @click="openQuickSsh">新增</el-button>
+          </div>
+          <div class="muted">经所选跳板再连 SQL，不用在这里手填账号密码。</div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button type="success" :loading="testing" @click="probe">测试</el-button>
         <el-button @click="dlg = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="quickRemoteDlg" title="新增群晖" width="520px" :close-on-click-modal="false" append-to-body>
+      <el-form :model="quickRemote" :label-width="narrow ? '88px' : '110px'">
+        <el-form-item label="名称"><el-input v-model="quickRemote.name" placeholder="办公室群晖" /></el-form-item>
+        <el-form-item label="地址">
+          <div class="pair-row">
+            <el-input class="grow" v-model="quickRemote.host" placeholder="192.168.1.5" />
+            <el-input-number class="port" v-model="quickRemote.port" :min="1" :max="65535" controls-position="right" />
+          </div>
+        </el-form-item>
+        <el-form-item label="HTTPS">
+          <el-switch v-model="quickRemote.https" @change="onQuickHttpsChange" />
+          <span class="muted" style="margin-left:10px">HTTP 5000 / HTTPS 5001</span>
+        </el-form-item>
+        <el-form-item label="账号"><el-input v-model="quickRemote.username" /></el-form-item>
+        <el-form-item label="密码">
+          <el-input v-model="quickRemote.password" type="password" show-password placeholder="必填" />
+        </el-form-item>
+        <el-form-item label="远程目录">
+          <el-input v-model="quickRemote.remote_dir" placeholder="/sql_backup" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="quickRemoteDlg = false">取消</el-button>
+        <el-button type="primary" :loading="quickRemoteSaving" @click="saveQuickRemote">保存并选用</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="quickSshDlg" title="新增 SSH 代理" width="520px" :close-on-click-modal="false" append-to-body>
+      <el-form :model="quickSsh" :label-width="narrow ? '88px' : '110px'">
+        <el-form-item label="名称"><el-input v-model="quickSsh.name" placeholder="办公室跳板" /></el-form-item>
+        <el-form-item label="地址">
+          <div class="pair-row">
+            <el-input class="grow" v-model="quickSsh.host" placeholder="andy.example.com" />
+            <el-input-number class="port" v-model="quickSsh.port" :min="1" :max="65535" controls-position="right" />
+          </div>
+        </el-form-item>
+        <el-form-item label="用户"><el-input v-model="quickSsh.username" placeholder="billy" /></el-form-item>
+        <el-form-item label="密码">
+          <el-input v-model="quickSsh.password" type="password" show-password placeholder="与密钥二选一" />
+        </el-form-item>
+        <el-form-item label="私钥">
+          <el-input v-model="quickSsh.key" type="textarea" :rows="3" placeholder="私钥内容，优先于密码" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="quickSshDlg = false">取消</el-button>
+        <el-button type="primary" :loading="quickSshSaving" @click="saveQuickSsh">保存并选用</el-button>
       </template>
     </el-dialog>
 
@@ -168,53 +223,6 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="remoteDlg" title="远程备份配置（群晖）" width="720px" :close-on-click-modal="false">
-      <div class="page-head" style="margin-bottom:12px">
-        <div class="muted">配置群晖地址、账号、密码和远程目录。连接里勾选「是否远程备份」后即可选用。</div>
-        <el-button type="primary" @click="openRemoteEdit()">新增群晖</el-button>
-      </div>
-      <el-table :data="remotes" stripe class="fit-table" table-layout="fixed">
-        <el-table-column prop="name" label="名称" show-overflow-tooltip />
-        <el-table-column label="地址" width="150" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.host }}:{{ row.port }}</template>
-        </el-table-column>
-        <el-table-column prop="username" label="账号" width="90" show-overflow-tooltip />
-        <el-table-column prop="remote_dir" label="远程目录" show-overflow-tooltip />
-        <el-table-column label="操作" class-name="ops-col" align="left" width="140" min-width="140">
-          <template #default="{ row }">
-            <div class="ops-cell">
-              <el-button text @click="openRemoteEdit(row)">编辑</el-button>
-              <el-button text type="danger" @click="removeRemote(row)">删除</el-button>
-            </div>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-dialog>
-
-    <el-dialog v-model="remoteEditDlg" :title="remoteForm.id ? '编辑群晖' : '新增群晖'" width="560px" :close-on-click-modal="false">
-      <el-form :model="remoteForm" label-width="110px">
-        <el-form-item label="名称"><el-input v-model="remoteForm.name" placeholder="办公室群晖" /></el-form-item>
-        <el-form-item label="地址"><el-input v-model="remoteForm.host" placeholder="192.168.1.5" /></el-form-item>
-        <el-form-item label="端口"><el-input-number v-model="remoteForm.port" :min="1" :max="65535" /></el-form-item>
-        <el-form-item label="HTTPS">
-          <el-switch v-model="remoteForm.https" @change="onRemoteHttpsChange" />
-          <span class="muted" style="margin-left:10px">HTTP 一般 5000，HTTPS 一般 5001</span>
-        </el-form-item>
-        <el-form-item label="账号"><el-input v-model="remoteForm.username" /></el-form-item>
-        <el-form-item label="密码">
-          <el-input v-model="remoteForm.password" type="password" show-password :placeholder="remoteForm.id ? '留空则使用已保存密码' : '必填'" />
-        </el-form-item>
-        <el-form-item label="远程目录">
-          <el-input v-model="remoteForm.remote_dir" placeholder="/sql_backup" />
-          <div class="muted">群晖 File Station 中的目录，例如 /fileserver/DB_BackUP。备份会放到 目录/连接名/库名/日期/ 下。</div>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button type="success" :loading="remoteTesting" @click="probeRemote">测试</el-button>
-        <el-button @click="remoteEditDlg = false">取消</el-button>
-        <el-button type="primary" :loading="remoteSaving" @click="saveRemote">保存</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -247,17 +255,18 @@ const dbOptions = ref([]);
 const selectedDbs = ref([]);
 const runForm = reactive({ backup_type: "full", compress: true, retain_days: 7, delete_old: true });
 const remotes = ref([]);
-const remoteDlg = ref(false);
-const remoteEditDlg = ref(false);
-const remoteSaving = ref(false);
-const remoteTesting = ref(false);
-const remoteForm = reactive(emptyRemote());
+const proxies = ref([]);
+const quickRemoteDlg = ref(false);
+const quickSshDlg = ref(false);
+const quickRemoteSaving = ref(false);
+const quickSshSaving = ref(false);
+const quickRemote = reactive(emptyRemote());
+const quickSsh = reactive(emptySsh());
 const backupStates = reactive({});
 const backupTimers = new Map();
 
 function emptyRemote() {
   return {
-    id: null,
     name: "",
     host: "",
     port: 5001,
@@ -265,6 +274,17 @@ function emptyRemote() {
     username: "",
     password: "",
     remote_dir: "/sql_backup",
+  };
+}
+
+function emptySsh() {
+  return {
+    name: "",
+    host: "",
+    port: 22,
+    username: "",
+    password: "",
+    key: "",
   };
 }
 
@@ -282,11 +302,7 @@ function emptyForm() {
     backup_dir: "",
     remote_enabled: false,
     remote_target_id: null,
-    ssh_host: "",
-    ssh_port: 22,
-    ssh_user: "",
-    ssh_password: "",
-    ssh_key: "",
+    ssh_proxy_id: null,
   };
 }
 
@@ -339,9 +355,10 @@ async function load() {
 }
 
 function openEdit(row) {
-  Object.assign(form, emptyForm(), row || {}, { password: "", ssh_password: "", ssh_key: "" });
+  Object.assign(form, emptyForm(), row || {}, { password: "" });
   form.remote_enabled = !!(row && row.remote_enabled);
   form.remote_target_id = row && row.remote_target_id ? row.remote_target_id : null;
+  form.ssh_proxy_id = row && row.ssh_proxy_id ? row.ssh_proxy_id : null;
   const names = String(row?.database || "")
     .replace(/;/g, ",")
     .split(",")
@@ -361,8 +378,8 @@ async function probe() {
     ElMessage.warning("请先填写数据库密码");
     return;
   }
-  if (form.connect_mode === "ssh" && !form.ssh_user && !form.id) {
-    ElMessage.warning("SSH 模式请填写 SSH 用户名");
+  if (form.connect_mode === "ssh" && !form.ssh_proxy_id) {
+    ElMessage.warning("SSH 模式请选择跳板代理");
     return;
   }
   testing.value = true;
@@ -374,11 +391,7 @@ async function probe() {
       username: form.username,
       password: form.password,
       connect_mode: form.connect_mode,
-      ssh_host: form.ssh_host,
-      ssh_port: form.ssh_port,
-      ssh_user: form.ssh_user,
-      ssh_password: form.ssh_password,
-      ssh_key: form.ssh_key,
+      ssh_proxy_id: form.ssh_proxy_id || 0,
     });
     const live = (data.databases || []).map(asDbItem);
     dbOptions.value = live;
@@ -404,10 +417,15 @@ async function save() {
     ElMessage.warning("已开启远程备份，请选择群晖配置");
     return;
   }
+  if (form.connect_mode === "ssh" && !form.ssh_proxy_id) {
+    ElMessage.warning("SSH 模式请选择跳板代理");
+    return;
+  }
   saving.value = true;
   try {
     const payload = { ...form, database: databasePayload() };
     payload.remote_target_id = form.remote_enabled ? Number(form.remote_target_id || 0) : 0;
+    payload.ssh_proxy_id = form.connect_mode === "ssh" ? Number(form.ssh_proxy_id || 0) : 0;
     delete payload.id;
     delete payload.has_password;
     delete payload.has_ssh_password;
@@ -415,6 +433,10 @@ async function save() {
     delete payload.created_at;
     delete payload.database_label;
     delete payload.remote_target_name;
+    delete payload.ssh_proxy_name;
+    delete payload.ssh_host;
+    delete payload.ssh_port;
+    delete payload.ssh_user;
     if (form.id) await http.put(`/connections/${form.id}`, payload);
     else await http.post("/connections", payload);
     ElMessage.success("已保存");
@@ -564,6 +586,69 @@ function progressText(state) {
   return `${verb}中 ${state.percent}%`;
 }
 
+function openQuickRemote() {
+  Object.assign(quickRemote, emptyRemote());
+  quickRemoteDlg.value = true;
+}
+
+function onQuickHttpsChange(on) {
+  if (on && Number(quickRemote.port) === 5000) quickRemote.port = 5001;
+  if (!on && Number(quickRemote.port) === 5001) quickRemote.port = 5000;
+}
+
+async function saveQuickRemote() {
+  if (!quickRemote.name || !quickRemote.host || !quickRemote.username) {
+    ElMessage.warning("请填写名称、地址和账号");
+    return;
+  }
+  if (!quickRemote.password) {
+    ElMessage.warning("请填写群晖密码");
+    return;
+  }
+  quickRemoteSaving.value = true;
+  try {
+    const { data } = await http.post("/remote-targets", { ...quickRemote });
+    const item = data.item || {};
+    ElMessage.success("已保存");
+    quickRemoteDlg.value = false;
+    await loadRemotes();
+    if (item.id) form.remote_target_id = item.id;
+  } catch (e) {
+    ElMessage.error(errMsg(e));
+  } finally {
+    quickRemoteSaving.value = false;
+  }
+}
+
+function openQuickSsh() {
+  Object.assign(quickSsh, emptySsh());
+  quickSshDlg.value = true;
+}
+
+async function saveQuickSsh() {
+  if (!quickSsh.name || !quickSsh.host || !quickSsh.username) {
+    ElMessage.warning("请填写名称、地址和用户");
+    return;
+  }
+  if (!quickSsh.password && !quickSsh.key) {
+    ElMessage.warning("请填写 SSH 密码或私钥");
+    return;
+  }
+  quickSshSaving.value = true;
+  try {
+    const { data } = await http.post("/ssh-proxies", { ...quickSsh });
+    const item = data.item || {};
+    ElMessage.success("已保存");
+    quickSshDlg.value = false;
+    await loadProxies();
+    if (item.id) form.ssh_proxy_id = item.id;
+  } catch (e) {
+    ElMessage.error(errMsg(e));
+  } finally {
+    quickSshSaving.value = false;
+  }
+}
+
 async function loadRemotes() {
   try {
     const { data } = await http.get("/remote-targets");
@@ -573,75 +658,10 @@ async function loadRemotes() {
   }
 }
 
-function openRemoteDlg() {
-  loadRemotes();
-  remoteDlg.value = true;
-}
-
-function openRemoteEdit(row) {
-  Object.assign(remoteForm, emptyRemote(), row || {}, { password: "" });
-  remoteEditDlg.value = true;
-}
-
-function onRemoteHttpsChange(on) {
-  if (on && Number(remoteForm.port) === 5000) remoteForm.port = 5001;
-  if (!on && Number(remoteForm.port) === 5001) remoteForm.port = 5000;
-}
-
-async function probeRemote() {
-  if (!remoteForm.host || !remoteForm.username) {
-    ElMessage.warning("请填写地址和账号");
-    return;
-  }
-  if (!remoteForm.id && !remoteForm.password) {
-    ElMessage.warning("请填写群晖密码");
-    return;
-  }
-  remoteTesting.value = true;
+async function loadProxies() {
   try {
-    const { data } = await http.post("/remote-targets/probe", remoteForm);
-    ElMessage.success(data.message || "连接成功");
-  } catch (e) {
-    ElMessage.error(errMsg(e));
-  } finally {
-    remoteTesting.value = false;
-  }
-}
-
-async function saveRemote() {
-  if (!remoteForm.name || !remoteForm.host || !remoteForm.username) {
-    ElMessage.warning("请填写名称、地址和账号");
-    return;
-  }
-  if (!remoteForm.id && !remoteForm.password) {
-    ElMessage.warning("请填写群晖密码");
-    return;
-  }
-  remoteSaving.value = true;
-  try {
-    const payload = { ...remoteForm };
-    delete payload.id;
-    delete payload.has_password;
-    delete payload.created_at;
-    if (remoteForm.id) await http.put(`/remote-targets/${remoteForm.id}`, payload);
-    else await http.post("/remote-targets", payload);
-    ElMessage.success("已保存");
-    remoteEditDlg.value = false;
-    loadRemotes();
-  } catch (e) {
-    ElMessage.error(errMsg(e));
-  } finally {
-    remoteSaving.value = false;
-  }
-}
-
-async function removeRemote(row) {
-  await ElMessageBox.confirm(`确认删除群晖配置「${row.name}」？`, "删除", { type: "warning" });
-  try {
-    await http.delete(`/remote-targets/${row.id}`);
-    ElMessage.success("已删除");
-    loadRemotes();
-    load();
+    const { data } = await http.get("/ssh-proxies");
+    proxies.value = data.items || [];
   } catch (e) {
     ElMessage.error(errMsg(e));
   }
@@ -650,6 +670,7 @@ async function removeRemote(row) {
 onMounted(() => {
   load();
   loadRemotes();
+  loadProxies();
   restoreProgress();
 });
 
