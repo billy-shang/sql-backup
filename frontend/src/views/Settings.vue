@@ -3,23 +3,23 @@
     <div class="page-head">
       <div>
         <h2>配置中心</h2>
-        <div class="muted">先在这里配好群晖和 SSH 跳板，新增或编辑连接时直接选用，不用再手填。</div>
+        <div class="muted">{{ admin ? "群晖、SSH 跳板和通知都在这里。连接里下拉选用，不用再手填。" : "备份完成后可向飞书、企业微信、钉钉推送结果。" }}</div>
       </div>
     </div>
 
     <el-tabs v-model="tab">
-      <el-tab-pane label="远程备份" name="remote">
+      <el-tab-pane v-if="admin" label="远程备份" name="remote">
         <div class="tab-toolbar">
           <div class="muted">群晖 File Station 地址、账号和远程目录。连接里勾选「是否远程备份」后即可选用。</div>
           <el-button type="primary" @click="openRemoteEdit()">新增群晖</el-button>
         </div>
         <el-table :data="remotes" stripe v-loading="remoteLoading" class="fit-table" table-layout="fixed" empty-text="暂无群晖配置">
-          <el-table-column prop="name" label="名称" :min-width="narrow ? 100 : 140" show-overflow-tooltip />
-          <el-table-column v-if="!narrow" label="地址" width="168" min-width="168" show-overflow-tooltip>
+          <el-table-column prop="name" label="名称" :min-width="narrow ? 100 : 120" show-overflow-tooltip />
+          <el-table-column v-if="!narrow" label="地址" min-width="280" show-overflow-tooltip>
             <template #default="{ row }">{{ row.host }}:{{ row.port }}</template>
           </el-table-column>
-          <el-table-column v-if="!narrow" prop="username" label="账号" width="110" show-overflow-tooltip />
-          <el-table-column prop="remote_dir" label="远程目录" :min-width="narrow ? 140 : 200" show-overflow-tooltip />
+          <el-table-column v-if="!narrow" prop="username" label="账号" width="100" min-width="100" show-overflow-tooltip />
+          <el-table-column prop="remote_dir" label="远程目录" :min-width="narrow ? 140 : 180" show-overflow-tooltip />
           <el-table-column label="操作" class-name="ops-col" align="left" width="140" min-width="140">
             <template #default="{ row }">
               <div class="ops-cell">
@@ -31,18 +31,18 @@
         </el-table>
       </el-tab-pane>
 
-      <el-tab-pane label="SSH 代理" name="ssh">
+      <el-tab-pane v-if="admin" label="SSH 代理" name="ssh">
         <div class="tab-toolbar">
           <div class="muted">跳板机地址、账号、密码或私钥。连接方式选「SSH 代理」后即可选用。</div>
           <el-button type="primary" @click="openSshEdit()">新增代理</el-button>
         </div>
         <el-table :data="proxies" stripe v-loading="sshLoading" class="fit-table" table-layout="fixed" empty-text="暂无 SSH 代理">
-          <el-table-column prop="name" label="名称" :min-width="narrow ? 100 : 140" show-overflow-tooltip />
-          <el-table-column v-if="!narrow" label="地址" width="168" min-width="168" show-overflow-tooltip>
+          <el-table-column prop="name" label="名称" :min-width="narrow ? 100 : 120" show-overflow-tooltip />
+          <el-table-column v-if="!narrow" label="地址" min-width="280" show-overflow-tooltip>
             <template #default="{ row }">{{ row.host }}:{{ row.port }}</template>
           </el-table-column>
-          <el-table-column prop="username" label="用户" :width="narrow ? 90 : 120" show-overflow-tooltip />
-          <el-table-column v-if="!narrow" label="认证" width="100">
+          <el-table-column prop="username" label="用户" :width="narrow ? 90 : 100" show-overflow-tooltip />
+          <el-table-column v-if="!narrow" label="认证" width="80" min-width="80">
             <template #default="{ row }">{{ row.has_key ? "私钥" : row.has_password ? "密码" : "—" }}</template>
           </el-table-column>
           <el-table-column label="操作" class-name="ops-col" align="left" width="140" min-width="140">
@@ -54,6 +54,13 @@
             </template>
           </el-table-column>
         </el-table>
+      </el-tab-pane>
+
+      <el-tab-pane label="通知" name="notify">
+        <div class="tab-toolbar">
+          <div class="muted">备份完成后可向飞书、企业微信、钉钉推送结果，可单选或同时启用。</div>
+        </div>
+        <NotifyPanel />
       </el-tab-pane>
     </el-tabs>
 
@@ -117,14 +124,18 @@ import { onMounted, reactive, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import http, { errMsg } from "../api";
+import { isAdmin } from "../format";
 import { useBreakpoints } from "../useBreakpoints";
+import NotifyPanel from "./Notify.vue";
 
+const admin = isAdmin();
 const { narrow } = useBreakpoints();
 const route = useRoute();
-const tab = ref("remote");
+const tab = ref(admin ? "remote" : "notify");
 
 function applyTab(raw) {
-  tab.value = raw === "ssh" ? "ssh" : "remote";
+  const allowed = admin ? ["remote", "ssh", "notify"] : ["notify"];
+  tab.value = allowed.includes(raw) ? raw : allowed[0];
 }
 
 watch(() => route.query.tab, (v) => applyTab(v), { immediate: true });
@@ -331,7 +342,9 @@ async function removeSsh(row) {
 }
 
 onMounted(() => {
-  loadRemotes();
-  loadProxies();
+  if (admin) {
+    loadRemotes();
+    loadProxies();
+  }
 });
 </script>

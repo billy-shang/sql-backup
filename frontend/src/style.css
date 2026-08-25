@@ -68,6 +68,10 @@ a { color: inherit; }
   line-height: 1.5;
   word-break: break-word;
 }
+.fit-table .size-col .cell {
+  overflow: hidden;
+  text-overflow: clip;
+}
 .db-tags {
   display: flex;
   flex-wrap: wrap;

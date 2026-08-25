@@ -1,11 +1,5 @@
 <template>
-  <div class="page-card">
-    <div class="page-head">
-      <div>
-        <h2>通知管理</h2>
-        <div class="muted">备份完成后，可向飞书、企业微信、钉钉推送结果，可单选或同时启用</div>
-      </div>
-    </div>
+  <div>
     <el-form :model="form" :label-position="narrow ? 'top' : 'right'" :label-width="narrow ? 'auto' : '120px'" class="notify-form">
       <el-form-item label="启用通知">
         <el-switch v-model="form.enabled" :disabled="!admin" />
@@ -49,7 +43,6 @@
         <span v-else class="muted">普通运维仅可查看，不能修改通知配置</span>
       </el-form-item>
     </el-form>
-    <el-divider />
     <div class="muted">
       飞书使用交互式卡片，企业微信和钉钉使用 Markdown 消息。成功显示成功状态，失败附带失败原因。
     </div>

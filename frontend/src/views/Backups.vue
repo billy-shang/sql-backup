@@ -37,7 +37,7 @@
       <el-table-column label="类型" width="72" min-width="72">
         <template #default="{ row }">{{ typeMap[row.backup_type] || row.backup_type }}</template>
       </el-table-column>
-      <el-table-column v-if="!narrow" label="大小" width="88" min-width="88">
+      <el-table-column v-if="!narrow" label="大小" class-name="size-col" width="120" min-width="120">
         <template #default="{ row }">{{ fmtSize(row.file_size) }}</template>
       </el-table-column>
       <el-table-column label="状态" width="100" min-width="100">

@@ -5,7 +5,6 @@ import Dashboard from "./views/Dashboard.vue";
 import Connections from "./views/Connections.vue";
 import Backups from "./views/Backups.vue";
 import Schedules from "./views/Schedules.vue";
-import Notify from "./views/Notify.vue";
 import Users from "./views/Users.vue";
 import Settings from "./views/Settings.vue";
 
@@ -22,7 +21,7 @@ const router = createRouter({
         { path: "backups", component: Backups },
         { path: "schedules", component: Schedules },
         { path: "settings", component: Settings },
-        { path: "notify", component: Notify },
+        { path: "notify", redirect: { path: "/settings", query: { tab: "notify" } } },
         { path: "users", component: Users },
       ],
     },
@@ -33,7 +32,7 @@ router.beforeEach((to) => {
   const token = localStorage.getItem("sqlbackup-token");
   if (to.path !== "/login" && !token) return "/login";
   if (to.path === "/login" && token) return "/";
-  if (to.path === "/users" || to.path === "/settings") {
+  if (to.path === "/users") {
     try {
       const user = JSON.parse(localStorage.getItem("sqlbackup-user") || "{}");
       if (user.role !== "admin") return "/";

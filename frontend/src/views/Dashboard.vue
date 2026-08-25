@@ -44,7 +44,7 @@
             <el-tag :type="statusType(row.status)" size="small" class="click-tag" :title="row.error_message || ''">{{ statusText(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column v-if="!narrow" prop="file_size" label="大小" width="88" min-width="88">
+        <el-table-column v-if="!narrow" prop="file_size" label="大小" class-name="size-col" width="120" min-width="120">
           <template #default="{ row }">{{ fmtSize(row.file_size) }}</template>
         </el-table-column>
         <el-table-column prop="started_at" label="时间" width="168" min-width="168">

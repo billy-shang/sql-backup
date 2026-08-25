@@ -31,13 +31,9 @@
           <el-icon><Timer /></el-icon>
           <span>定时任务</span>
         </el-menu-item>
-        <el-menu-item v-if="isAdmin" index="/settings">
+        <el-menu-item index="/settings">
           <el-icon><Setting /></el-icon>
           <span>配置中心</span>
-        </el-menu-item>
-        <el-menu-item index="/notify">
-          <el-icon><Bell /></el-icon>
-          <span>通知管理</span>
         </el-menu-item>
         <el-menu-item v-if="isAdmin" index="/users">
           <el-icon><User /></el-icon>
@@ -134,7 +130,7 @@
           <li>直连：平台能访问 SQL 端口（通常 1433）时使用</li>
           <li>SSH：只能 SSH 时走跳板隧道，再连 SQL</li>
           <li>新增/编辑时点「测试」勾选库；系统库默认不勾选</li>
-          <li>管理员在「配置中心」配群晖和 SSH 跳板；新增/编辑连接时选用，不必手填。运维可立即备份、下载，不能改连接/任务/用户/恢复</li>
+          <li>管理员在「配置中心」配群晖、SSH 跳板和通知；新增/编辑连接时选用，不必手填。运维可立即备份、下载，不能改连接/任务/用户/恢复</li>
           <li>删除连接会同时删掉该连接下的定时任务和备份历史；单独删除定时任务不影响连接</li>
         </ul>
       </section>
@@ -143,6 +139,7 @@
         <ul>
           <li>远程备份：群晖 File Station 地址、账号、远程目录</li>
           <li>SSH 代理：跳板机地址、账号、密码或私钥。多条连接可共用同一跳板</li>
+          <li>通知：飞书 / 企业微信 / 钉钉 Webhook，可同时启用</li>
           <li>新增或编辑连接时，像选群晖一样下拉选择，不必再手填</li>
         </ul>
       </section>
@@ -166,7 +163,7 @@
           <li>完整 / 差异 / 日志备份。差异需已有完整备份；SIMPLE 库不能做日志备份。备份后会自动校验文件。</li>
           <li>保留天数：只留最近 N 天的日期目录，更早的会从 SQL Server 本机和群晖删除（需勾选「删除旧备份」）</li>
           <li>定时：每天、每周或指定时间；暂停后不再触发。容器重启后会补跑 36 小时内漏掉的任务</li>
-          <li>通知：可选择飞书、企业微信、钉钉，可同时启用，填写对应机器人 Webhook</li>
+          <li>通知：在「配置中心」→「通知」填写飞书、企业微信、钉钉机器人 Webhook，可同时启用</li>
         </ul>
       </section>
     </div>
@@ -200,7 +197,6 @@ const titles = {
   "/backups": "备份文件",
   "/schedules": "定时任务",
   "/settings": "配置中心",
-  "/notify": "通知管理",
   "/users": "用户管理",
 };
 const title = computed(() => titles[route.path] || "SQL Backup");
