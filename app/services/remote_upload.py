@@ -277,73 +277,107 @@ def _sql_write_text_file(dbc: Any, dest: str, text: str) -> None:
 
 
 def _upload_ps_script(syno: dict[str, Any], src: str, dest_dir: str, filename: str) -> str:
-    """SQL Server 本机执行：登录群晖后流式上传，不经平台中转。"""
+    """SQL Server 本机执行：登录群晖后流式上传。只用不依赖 PowerShell 3 的 API。"""
     scheme = "https" if syno.get("https") else "http"
     base = f"{scheme}://{syno['host']}:{int(syno['port'])}"
     return f"""
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 try {{ [Net.ServicePointManager]::ServerCertificateValidationCallback = {{ $true }} }} catch {{}}
+try {{ [Net.ServicePointManager]::Expect100Continue = $false }} catch {{}}
 $base = {_ps_lit(base)}
 $user = {_ps_lit(str(syno.get("username") or ""))}
 $pass = {_ps_lit(str(syno.get("password") or ""))}
 $src = {_ps_lit(src)}
 $dest = {_ps_lit(dest_dir.replace("\\\\", "/").rstrip("/"))}
 $fn = {_ps_lit(filename)}
-if (-not (Test-Path -LiteralPath $src)) {{ throw "文件不存在 $src" }}
-$login = $null
-foreach ($ver in 7,6,3,2) {{
-  try {{
-    $login = Invoke-RestMethod -Uri ($base + '/webapi/auth.cgi') -Method POST -Body @{{
-      api = 'SYNO.API.Auth'; version = [string]$ver; method = 'login'
-      account = $user; passwd = $pass; session = 'FileStation'
-      format = 'sid'; enable_syno_token = 'yes'
-    }}
-    if ($login.success) {{ break }}
-  }} catch {{}}
-}}
-if (-not $login -or -not $login.success) {{ throw '群晖登录失败' }}
-$sid = [string]$login.data.sid
-$tok = [string]($login.data.synotoken)
-$u = $base + '/webapi/entry.cgi?api=SYNO.FileStation.Upload&version=2&method=upload&_sid=' + $sid
-$curl = Get-Command curl.exe -ErrorAction SilentlyContinue
-if ($curl) {{
-  $args = @('-sS','-k','--connect-timeout','20','--max-time','28800','-X','POST',$u,
-    '-F',('path=' + $dest),'-F','create_parents=true','-F','overwrite=true',
-    '-F',('file=@' + $src + ';filename=' + $fn))
-  if ($tok) {{ $args += @('-H',('X-SYNO-TOKEN: ' + $tok)) }}
-  $out = & curl.exe @args
-  Write-Output $out
-}} else {{
-  Add-Type -AssemblyName System.Net.Http
-  $hh = New-Object System.Net.Http.HttpClientHandler
-  try {{ $hh.ServerCertificateCustomValidationCallback = {{ $true }} }} catch {{}}
-  $c = New-Object System.Net.Http.HttpClient($hh)
-  $c.Timeout = [TimeSpan]::FromHours(8)
-  if ($tok) {{ [void]$c.DefaultRequestHeaders.TryAddWithoutValidation('X-SYNO-TOKEN', $tok) }}
-  $mp = New-Object System.Net.Http.MultipartFormDataContent
-  $mp.Add((New-Object System.Net.Http.StringContent($dest)), 'path')
-  $mp.Add((New-Object System.Net.Http.StringContent('true')), 'create_parents')
-  $mp.Add((New-Object System.Net.Http.StringContent('true')), 'overwrite')
-  $fs = [IO.File]::OpenRead($src)
-  try {{
-    $sc = New-Object System.Net.Http.StreamContent($fs)
-    $sc.Headers.ContentType = [Net.Http.Headers.MediaTypeHeaderValue]::Parse('application/octet-stream')
-    $mp.Add($sc, 'file', $fn)
-    $resp = $c.PostAsync($u, $mp).Result
-    $txt = $resp.Content.ReadAsStringAsync().Result
-    Write-Output $txt
-  }} finally {{
-    $fs.Close(); $c.Dispose()
+if (-not [IO.File]::Exists($src)) {{ throw ('文件不存在 ' + $src) }}
+Write-Output ('SQLBAK_PS=' + [string]$PSVersionTable.PSVersion)
+function Enc([string]$s) {{ return [Uri]::EscapeDataString($s) }}
+$sid = ''
+$tok = ''
+$curl = $null
+try {{ $curl = Get-Command curl.exe -ErrorAction SilentlyContinue }} catch {{}}
+$txt = ''
+foreach ($ver in @('7','6','3','2')) {{
+  $loginUrl = $base + '/webapi/auth.cgi'
+  $form = 'api=SYNO.API.Auth&version=' + $ver + '&method=login&account=' + (Enc $user) + '&passwd=' + (Enc $pass) + '&session=FileStation&format=sid&enable_syno_token=yes'
+  if ($curl) {{
+    $txt = & curl.exe -sS -k --connect-timeout 20 -X POST $loginUrl -d $form
+  }} else {{
+    $wc = New-Object System.Net.WebClient
+    $wc.Headers.Add('Content-Type','application/x-www-form-urlencoded')
+    $txt = [Text.Encoding]::UTF8.GetString($wc.UploadData($loginUrl, 'POST', [Text.Encoding]::UTF8.GetBytes($form)))
+    $wc.Dispose()
+  }}
+  if ($txt -match '"sid"\\s*:\\s*"([^"]+)"') {{
+    $sid = $Matches[1]
+    if ($txt -match '"synotoken"\\s*:\\s*"([^"]+)"') {{ $tok = $Matches[1] }}
+    break
   }}
 }}
+if (-not $sid) {{ throw ('群晖登录失败 ' + $txt) }}
+$u = $base + '/webapi/entry.cgi?api=SYNO.FileStation.Upload&version=2&method=upload&_sid=' + $sid
+$out = ''
+if ($curl) {{
+  $cargs = @('-sS','-k','--connect-timeout','20','--max-time','28800','-X','POST',$u,
+    '-F',('path=' + $dest),'-F','create_parents=true','-F','overwrite=true',
+    '-F',('file=@' + $src + ';filename=' + $fn))
+  if ($tok) {{ $cargs += @('-H',('X-SYNO-TOKEN: ' + $tok)) }}
+  $out = & curl.exe @cargs
+}} else {{
+  $boundary = '----sqlbak' + [guid]::NewGuid().ToString('N')
+  $enc = [Text.Encoding]::UTF8
+  $CRLF = [char]13 + [char]10
+  function Part([string]$name, [string]$val) {{
+    return '--' + $boundary + $CRLF + 'Content-Disposition: form-data; name="' + $name + '"' + $CRLF + $CRLF + $val + $CRLF
+  }}
+  $pre = $enc.GetBytes((Part 'path' $dest) + (Part 'create_parents' 'true') + (Part 'overwrite' 'true') + '--' + $boundary + $CRLF + 'Content-Disposition: form-data; name="file"; filename="' + $fn + '"' + $CRLF + 'Content-Type: application/octet-stream' + $CRLF + $CRLF)
+  $post = $enc.GetBytes($CRLF + '--' + $boundary + '--' + $CRLF)
+  $fi = New-Object IO.FileInfo($src)
+  $req = [Net.HttpWebRequest]::Create($u)
+  $req.Method = 'POST'
+  $req.Timeout = 28800000
+  $req.ReadWriteTimeout = 28800000
+  $req.AllowWriteStreamBuffering = $false
+  $req.ContentType = 'multipart/form-data; boundary=' + $boundary
+  $req.ContentLength = $pre.Length + $fi.Length + $post.Length
+  if ($tok) {{ $req.Headers.Add('X-SYNO-TOKEN', $tok) }}
+  $rs = $req.GetRequestStream()
+  $rs.Write($pre, 0, $pre.Length)
+  $fs = $fi.OpenRead()
+  $buf = New-Object byte[] 65536
+  while (($n = $fs.Read($buf, 0, $buf.Length)) -gt 0) {{ $rs.Write($buf, 0, $n) }}
+  $fs.Close()
+  $rs.Write($post, 0, $post.Length)
+  $rs.Close()
+  try {{
+    $resp = $req.GetResponse()
+    $sr = New-Object IO.StreamReader($resp.GetResponseStream())
+    $out = $sr.ReadToEnd()
+    $sr.Close(); $resp.Close()
+  }} catch [Net.WebException] {{
+    $ex = $_.Exception
+    if ($ex.Response) {{
+      $sr = New-Object IO.StreamReader($ex.Response.GetResponseStream())
+      $out = $sr.ReadToEnd(); $sr.Close()
+      throw ('http ' + $out)
+    }}
+    throw
+  }}
+}}
+Write-Output $out
+if ($out -match '"success"\\s*:\\s*true') {{ Write-Output 'SQLBAK_UP_OK' }} else {{ throw ('upload fail ' + $out) }}
 """.strip() + "\n"
 
 
 def _parse_syno_upload_ok(lines: list[str], dest_dir: str, filename: str) -> str:
     text = "\n".join(lines or [])
     remote = dest_dir.rstrip("/") + "/" + filename
-    if '"success":true' in text.replace(" ", "") or '"success": true' in text:
+    if any("SQLBAK_UP_OK" in x for x in (lines or [])):
+        return remote
+    compact = text.replace(" ", "")
+    if '"success":true' in compact:
         return remote
     raise RuntimeError((text or "群晖直传无输出")[:800])
 
@@ -370,23 +404,28 @@ def _upload_via_sql_direct(
         with _sql_temp_enable(dbc, "xp_cmdshell") as ok:
             if not ok:
                 raise RuntimeError("无法临时开启 xp_cmdshell，SQL 账号需要 sysadmin")
-            if len(encoded) < 7500:
-                log.info("[remote] 使用 EncodedCommand 直跑，长度=%s", len(encoded))
+            # EncodedCommand 过长会被 xp_cmdshell（约 4000/8000 字）截断。
+            # 优先写 .ps1；只有写出失败且命令够短时才改 EncodedCommand。
+            wrote = False
+            try:
+                _sql_write_text_file(dbc, ps1, script)
+                wrote = True
+                lines = _sql_run(
+                    dbc,
+                    "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \""
+                    + ps1
+                    + "\"",
+                )
+            except Exception as write_err:  # noqa: BLE001
+                if wrote or len(encoded) >= 3500:
+                    raise
+                log.warning("[remote] 写脚本失败，改 EncodedCommand: %s", write_err)
                 lines = _sql_run(dbc, encoded)
-            else:
+            finally:
                 try:
-                    _sql_write_text_file(dbc, ps1, script)
-                    lines = _sql_run(
-                        dbc,
-                        "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \""
-                        + ps1
-                        + "\"",
-                    )
-                finally:
-                    try:
-                        _sql_run(dbc, f'cmd.exe /c del /f /q "{ps1}"')
-                    except Exception:  # noqa: BLE001
-                        pass
+                    _sql_run(dbc, f'cmd.exe /c del /f /q "{ps1}"')
+                except Exception:  # noqa: BLE001
+                    pass
     remote = _parse_syno_upload_ok(lines, dest_dir, filename)
     log.info("[remote] SQL 本机直传完成 %s", remote)
     return remote

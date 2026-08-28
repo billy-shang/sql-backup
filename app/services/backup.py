@@ -1321,25 +1321,30 @@ def _sql_reconfigure(conn: Any, name: str, value: int) -> None:
 
 @contextmanager
 def _sql_temp_enable(conn: Any, option: str):
-    """临时打开 xp_cmdshell / OLE，清理完立刻恢复原值。"""
+    """临时打开 xp_cmdshell / OLE，清理完立刻恢复原值。
+
+    不能在 except 里再 yield：with 块抛错后会被盖成
+    ``generator didn't stop after throw()``，真实上传错误就丢了。
+    """
     current = _sql_config_int(conn, option)
     advanced = _sql_config_int(conn, "show advanced options")
     changed = False
     adv_changed = False
+    ok = current == 1
     try:
-        if current == 1:
-            yield True
-            return
-        if advanced != 1:
-            _sql_reconfigure(conn, "show advanced options", 1)
-            adv_changed = True
-        _sql_reconfigure(conn, option, 1)
-        changed = True
-        log.info("[backup] 已临时开启 %s（原值=%s，结束后恢复）", option, current)
-        yield True
+        if not ok:
+            if advanced != 1:
+                _sql_reconfigure(conn, "show advanced options", 1)
+                adv_changed = True
+            _sql_reconfigure(conn, option, 1)
+            changed = True
+            ok = True
+            log.info("[backup] 已临时开启 %s（原值=%s，结束后恢复）", option, current)
     except Exception as e:  # noqa: BLE001
         log.warning("[backup] 无法开启 %s: %s", option, e)
-        yield False
+        ok = False
+    try:
+        yield ok
     finally:
         if changed:
             try:

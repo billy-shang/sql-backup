@@ -1,7 +1,7 @@
 # 别人下载后直接用这一份（不需要源码、不执行 build）
 services:
   sql-backup:
-    image: billyshang/sql-backup:v1.0.50
+    image: billyshang/sql-backup:v1.0.51
     ports:
       - "8788:8788"
     environment:
