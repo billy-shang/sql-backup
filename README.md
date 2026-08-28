@@ -3,7 +3,7 @@
 SQL Server 备份管理平台。平台可部署在任意机器；`.bak` 写在 **SQL Server 所在服务器**，不是本平台。
 
 - 源码：https://github.com/billy-shang/sql-backup
-- 镜像：https://hub.docker.com/r/billyshang/sql-backup （当前 `v1.0.48`）
+- 镜像：https://hub.docker.com/r/billyshang/sql-backup （当前 `v1.0.50`）
 
 ## 功能
 
@@ -51,13 +51,19 @@ python -m app
 
 打开 http://127.0.0.1:8788 ，默认 `admin` / `admin@123`
 
+## 群晖上传
+
+Windows 上的 `.bak` 优先由 **SQL Server 本机直传群晖**（PowerShell EncodedCommand + curl / HttpClient 流式上传）。SQL 机要能访问群晖 File Station（HTTP 5000 / HTTPS 5001）。大于 32MB 的文件直传失败不会再改走平台分块中转。
+
+进度条在归档阶段会显示「正在上传群晖 库名 xxMB」。最后一个库仍可能停在约 98%，等群晖列出现路径即结束。
+
 ## Docker 部署
 
 ```bash
-docker pull billyshang/sql-backup:v1.0.48
+docker pull billyshang/sql-backup:v1.0.50
 docker run -d --name sql-backup --restart unless-stopped \
   -p 8788:8788 -e TZ=Asia/Shanghai -e SQL_BACKUP_DATA_DIR=/data \
-  -v "$PWD/data:/data" billyshang/sql-backup:v1.0.48
+  -v "$PWD/data:/data" billyshang/sql-backup:v1.0.50
 ```
 
 

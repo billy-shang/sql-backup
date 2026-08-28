@@ -275,6 +275,27 @@ def test_synology(host: str, port: int, username: str, password: str, https: boo
         cli.close()
 
 
+def ensure_remote_dir(
+    *,
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    https: bool,
+    remote_dir: str,
+    dest_subdir: str,
+) -> str:
+    """在群晖上建好目标目录，返回完整远程路径。"""
+    dest = posixpath.join(_fs_path(remote_dir), dest_subdir.replace("\\", "/").strip("/"))
+    cli = SynologyClient(host, port, username, password, https)
+    try:
+        cli.login()
+        cli.mkdir(dest)
+        return dest
+    finally:
+        cli.close()
+
+
 def upload_to_synology(
     *,
     host: str,

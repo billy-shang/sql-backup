@@ -66,6 +66,8 @@ def _backup_one(
         db.commit()
         if conn.remote_enabled and conn.remote_target_id:
             try:
+                size_mb = max(int((rec.file_size or 0) / (1024 * 1024)), 0)
+                prog.set_message(int(conn.id), f"正在上传群晖 {dbname} {size_mb}MB", dbname)
                 rec.remote_path = upload_backup_to_remote(
                     db,
                     conn,

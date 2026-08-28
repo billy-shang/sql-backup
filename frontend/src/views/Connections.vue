@@ -582,6 +582,9 @@ function progressText(state) {
   const verb = state.kind === "restore" ? "恢复" : "备份";
   if (state.status === "success") return "已完成 100%";
   if (state.status === "failed") return state.message || `${verb}失败`;
+  if (state.message && /上传|群晖/.test(state.message)) {
+    return `${state.message} ${state.percent || 98}%`;
+  }
   if (state.current_db) return `${state.current_db} ${state.percent}%`;
   return `${verb}中 ${state.percent}%`;
 }

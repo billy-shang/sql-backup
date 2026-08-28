@@ -57,12 +57,12 @@
               @click="openRestore(row)"
             >恢复</el-button>
             <el-button v-if="admin" text type="danger" @click="remove(row)">删除</el-button>
-            <el-dropdown v-if="admin && (narrow || row.remote_status === 'failed')" trigger="click">
+            <el-dropdown v-if="admin && (narrow || canRetryRemote(row))" trigger="click">
               <el-button text>更多</el-button>
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item v-if="narrow" :disabled="!canRestore(row)" @click="openRestore(row)">恢复</el-dropdown-item>
-                  <el-dropdown-item v-if="row.remote_status === 'failed'" @click="retryRemote(row)">重试归档</el-dropdown-item>
+                  <el-dropdown-item v-if="canRetryRemote(row)" @click="retryRemote(row)">重试归档</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
@@ -205,6 +205,10 @@ function canRestore(row) {
   const st = restoreState.value;
   if (st && st.status === "running" && st.connection_id === row.connection_id) return false;
   return true;
+}
+
+function canRetryRemote(row) {
+  return Boolean(row && row.status === "success" && row.remote_status !== "success");
 }
 
 async function load() {

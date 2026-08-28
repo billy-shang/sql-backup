@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,13 @@ from app.services.backup import (
     xp_cmdshell_lines,
 )
 from app.services.ssh_util import ssh_params
-from app.services.synology import cleanup_synology_days, test_synology, upload_to_synology
+from app.services import progress as prog
+from app.services.synology import (
+    cleanup_synology_days,
+    ensure_remote_dir,
+    test_synology,
+    upload_to_synology,
+)
 
 log = logging.getLogger(__name__)
 
@@ -99,28 +106,65 @@ def upload_backup_to_remote(
         db.commit()
     except Exception:  # noqa: BLE001
         db.rollback()
-    staged: Path | None = None
-    local = _existing_local(rec)
+    size_mb = max(int((rec.file_size or 0) / (1024 * 1024)), 0)
     try:
-        if not local:
-            staged = _stage_remote_file(conn_row, rec)
-            local = staged
-        if not local or not local.is_file():
-            raise RuntimeError(
-                f"本地备份已完成，但平台读不到文件 {src_path}，无法上传群晖。"
-                "请确认平台能访问该备份盘，且群晖 File Station（HTTP 5000 / HTTPS 5001）网络互通。"
-            )
-        remote = upload_to_synology(
+        prog.set_message(int(conn_row.id), f"正在上传群晖 {dbname} {size_mb}MB", dbname)
+    except Exception:  # noqa: BLE001
+        pass
+    dest_dir = ""
+    try:
+        dest_dir = ensure_remote_dir(
             host=syno["host"],
             port=syno["port"],
             username=syno["username"],
             password=syno["password"],
             https=syno["https"],
             remote_dir=syno["remote_dir"],
-            local_file=local,
             dest_subdir=dest_subdir,
-            filename=filename,
         )
+    except Exception as e:  # noqa: BLE001
+        log.warning("[remote] 平台预建群晖目录失败，上传时再创建: %s", e)
+    staged: Path | None = None
+    local = _existing_local(rec)
+    try:
+        remote = ""
+        if _is_windows_path(src_path) and not local:
+            try:
+                remote = _upload_via_sql_direct(
+                    conn_row,
+                    src_path,
+                    syno,
+                    dest_dir or f"{(syno['remote_dir'] or '').rstrip('/')}/{dest_subdir}",
+                    filename,
+                    int(rec.file_size or 0),
+                )
+                log.info("[remote] SQL 本机直传群晖成功 %s", remote)
+            except Exception as e:  # noqa: BLE001
+                log.warning("[remote] SQL 本机直传失败: %s", e)
+                if int(rec.file_size or 0) > _MAX_SQL_BLOB:
+                    raise RuntimeError(
+                        f"SQL 本机直传失败，已取消平台中转（大文件分块会极慢）：{e}"
+                    ) from e
+        if not remote:
+            if not local:
+                staged = _stage_remote_file(conn_row, rec)
+                local = staged
+            if not local or not local.is_file():
+                raise RuntimeError(
+                    f"本地备份已完成，但平台读不到文件 {src_path}，无法上传群晖。"
+                    "请确认平台能访问该备份盘，且群晖 File Station（HTTP 5000 / HTTPS 5001）网络互通。"
+                )
+            remote = upload_to_synology(
+                host=syno["host"],
+                port=syno["port"],
+                username=syno["username"],
+                password=syno["password"],
+                https=syno["https"],
+                remote_dir=syno["remote_dir"],
+                local_file=local,
+                dest_subdir=dest_subdir,
+                filename=filename,
+            )
         log.info("[remote] 已上传群晖 %s", remote)
         if delete_old and retain_days > 0:
             parent = "/".join(dest_parts[:-1] if day else dest_parts)
@@ -179,6 +223,173 @@ def _stage_remote_file(conn_row: DbConnection, rec: Any) -> Path | None:
         except Exception as e:  # noqa: BLE001
             log.warning("[remote] 经 SQL 读取 bak 失败: %s", e)
     return None
+
+
+def _ps_lit(value: str) -> str:
+    """PowerShell 单引号字面量。"""
+    return "'" + str(value or "").replace("'", "''") + "'"
+
+
+def _ps_encoded_cmd(script: str) -> str:
+    """PowerShell -EncodedCommand：UTF-16LE，不依赖本机临时文件。"""
+    enc = base64.b64encode((script or "").encode("utf-16-le")).decode("ascii")
+    return "powershell.exe -NoProfile -NonInteractive -EncodedCommand " + enc
+
+
+def _sql_run(dbc: Any, cmd: str) -> list[str]:
+    lines = xp_cmdshell_lines(dbc, cmd)
+    if lines:
+        log.info("[remote] xp_cmdshell 输出: %s", " | ".join(lines)[:500])
+    return lines
+
+
+def _sql_write_text_file(dbc: Any, dest: str, text: str) -> None:
+    """把脚本写成 SQL Server 本机临时文件。只用 [IO.File]，兼容 PowerShell 2。"""
+    raw = (text or "").encode("utf-8")
+    b64 = base64.b64encode(raw).decode("ascii")
+    dest_ps = dest.replace("'", "''")
+    b64_path = dest + ".b64"
+    b64_ps = b64_path.replace("'", "''")
+    _sql_run(
+        dbc,
+        "powershell.exe -NoProfile -NonInteractive -Command "
+        f"\"foreach($p in @('{dest_ps}','{b64_ps}')){{if([IO.File]::Exists($p)){{[IO.File]::Delete($p)}}}}\"",
+    )
+    step = 1500
+    for i in range(0, len(b64), step):
+        piece = b64[i : i + step]
+        if i == 0:
+            cmd = f"[IO.File]::WriteAllText('{b64_ps}','{piece}')"
+        else:
+            cmd = f"[IO.File]::AppendAllText('{b64_ps}','{piece}')"
+        _sql_run(dbc, "powershell.exe -NoProfile -NonInteractive -Command \"" + cmd + "\"")
+    out = _sql_run(
+        dbc,
+        "powershell.exe -NoProfile -NonInteractive -Command "
+        f"\"$t=[IO.File]::ReadAllText('{b64_ps}');"
+        f"[IO.File]::WriteAllBytes('{dest_ps}',[Convert]::FromBase64String($t));"
+        f"[IO.File]::Delete('{b64_ps}');"
+        f"if([IO.File]::Exists('{dest_ps}')){{'SQLBAK_PS1_OK'}}else{{'SQLBAK_PS1_MISSING'}}\"",
+    )
+    if not any("SQLBAK_PS1_OK" in x for x in out):
+        raise RuntimeError("未能在 SQL Server 本机写出上传脚本：" + " ".join(out)[:400])
+    log.info("[remote] 已写入 SQL 本机脚本 %s (%s 字节)", dest, len(raw))
+
+
+def _upload_ps_script(syno: dict[str, Any], src: str, dest_dir: str, filename: str) -> str:
+    """SQL Server 本机执行：登录群晖后流式上传，不经平台中转。"""
+    scheme = "https" if syno.get("https") else "http"
+    base = f"{scheme}://{syno['host']}:{int(syno['port'])}"
+    return f"""
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+try {{ [Net.ServicePointManager]::ServerCertificateValidationCallback = {{ $true }} }} catch {{}}
+$base = {_ps_lit(base)}
+$user = {_ps_lit(str(syno.get("username") or ""))}
+$pass = {_ps_lit(str(syno.get("password") or ""))}
+$src = {_ps_lit(src)}
+$dest = {_ps_lit(dest_dir.replace("\\\\", "/").rstrip("/"))}
+$fn = {_ps_lit(filename)}
+if (-not (Test-Path -LiteralPath $src)) {{ throw "文件不存在 $src" }}
+$login = $null
+foreach ($ver in 7,6,3,2) {{
+  try {{
+    $login = Invoke-RestMethod -Uri ($base + '/webapi/auth.cgi') -Method POST -Body @{{
+      api = 'SYNO.API.Auth'; version = [string]$ver; method = 'login'
+      account = $user; passwd = $pass; session = 'FileStation'
+      format = 'sid'; enable_syno_token = 'yes'
+    }}
+    if ($login.success) {{ break }}
+  }} catch {{}}
+}}
+if (-not $login -or -not $login.success) {{ throw '群晖登录失败' }}
+$sid = [string]$login.data.sid
+$tok = [string]($login.data.synotoken)
+$u = $base + '/webapi/entry.cgi?api=SYNO.FileStation.Upload&version=2&method=upload&_sid=' + $sid
+$curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+if ($curl) {{
+  $args = @('-sS','-k','--connect-timeout','20','--max-time','28800','-X','POST',$u,
+    '-F',('path=' + $dest),'-F','create_parents=true','-F','overwrite=true',
+    '-F',('file=@' + $src + ';filename=' + $fn))
+  if ($tok) {{ $args += @('-H',('X-SYNO-TOKEN: ' + $tok)) }}
+  $out = & curl.exe @args
+  Write-Output $out
+}} else {{
+  Add-Type -AssemblyName System.Net.Http
+  $hh = New-Object System.Net.Http.HttpClientHandler
+  try {{ $hh.ServerCertificateCustomValidationCallback = {{ $true }} }} catch {{}}
+  $c = New-Object System.Net.Http.HttpClient($hh)
+  $c.Timeout = [TimeSpan]::FromHours(8)
+  if ($tok) {{ [void]$c.DefaultRequestHeaders.TryAddWithoutValidation('X-SYNO-TOKEN', $tok) }}
+  $mp = New-Object System.Net.Http.MultipartFormDataContent
+  $mp.Add((New-Object System.Net.Http.StringContent($dest)), 'path')
+  $mp.Add((New-Object System.Net.Http.StringContent('true')), 'create_parents')
+  $mp.Add((New-Object System.Net.Http.StringContent('true')), 'overwrite')
+  $fs = [IO.File]::OpenRead($src)
+  try {{
+    $sc = New-Object System.Net.Http.StreamContent($fs)
+    $sc.Headers.ContentType = [Net.Http.Headers.MediaTypeHeaderValue]::Parse('application/octet-stream')
+    $mp.Add($sc, 'file', $fn)
+    $resp = $c.PostAsync($u, $mp).Result
+    $txt = $resp.Content.ReadAsStringAsync().Result
+    Write-Output $txt
+  }} finally {{
+    $fs.Close(); $c.Dispose()
+  }}
+}}
+""".strip() + "\n"
+
+
+def _parse_syno_upload_ok(lines: list[str], dest_dir: str, filename: str) -> str:
+    text = "\n".join(lines or [])
+    remote = dest_dir.rstrip("/") + "/" + filename
+    if '"success":true' in text.replace(" ", "") or '"success": true' in text:
+        return remote
+    raise RuntimeError((text or "群晖直传无输出")[:800])
+
+
+def _upload_via_sql_direct(
+    conn_row: DbConnection,
+    windows_path: str,
+    syno: dict[str, Any],
+    dest_dir: str,
+    filename: str,
+    size: int,
+) -> str:
+    """让 SQL Server 本机用 curl/HttpClient 直传群晖，700MB 级文件按局域网速度走。"""
+    dest_dir = (dest_dir or "").replace("\\", "/").rstrip("/")
+    if not dest_dir:
+        raise RuntimeError("群晖目标目录为空")
+    script = _upload_ps_script(syno, windows_path, dest_dir, filename)
+    encoded = _ps_encoded_cmd(script)
+    stamp = str(int(time.time()))
+    ps1 = f"C:\\Windows\\Temp\\sqlbak_up_{stamp}.ps1"
+    log.info("[remote] SQL 本机直传 %s -> %s/%s size=%s", windows_path, dest_dir, filename, size)
+    lines: list[str] = []
+    with open_sql_session(conn_row, timeout=8 * 3600) as dbc:
+        with _sql_temp_enable(dbc, "xp_cmdshell") as ok:
+            if not ok:
+                raise RuntimeError("无法临时开启 xp_cmdshell，SQL 账号需要 sysadmin")
+            if len(encoded) < 7500:
+                log.info("[remote] 使用 EncodedCommand 直跑，长度=%s", len(encoded))
+                lines = _sql_run(dbc, encoded)
+            else:
+                try:
+                    _sql_write_text_file(dbc, ps1, script)
+                    lines = _sql_run(
+                        dbc,
+                        "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \""
+                        + ps1
+                        + "\"",
+                    )
+                finally:
+                    try:
+                        _sql_run(dbc, f'cmd.exe /c del /f /q "{ps1}"')
+                    except Exception:  # noqa: BLE001
+                        pass
+    remote = _parse_syno_upload_ok(lines, dest_dir, filename)
+    log.info("[remote] SQL 本机直传完成 %s", remote)
+    return remote
 
 
 def _fetch_via_sql(conn_row: DbConnection, windows_path: str, dest: Path, size: int = 0) -> None:
