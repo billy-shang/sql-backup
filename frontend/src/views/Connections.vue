@@ -121,10 +121,10 @@
             填 SQL Server 本机路径，不是本平台路径。留空则用实例默认 Backup 目录。例如 D:\TEST 或 G:\sql_backup。文件在「目录\库名\日期\」子目录里，根目录通常看不到 .bak。
           </div>
         </el-form-item>
-        <el-form-item label="是否远程备份">
+        <el-form-item label="是否群晖备份">
           <el-switch v-model="form.remote_enabled" />
         </el-form-item>
-        <el-form-item v-if="form.remote_enabled" label="远程备份">
+        <el-form-item v-if="form.remote_enabled" label="群晖备份">
           <div class="select-with-add">
             <el-select v-model="form.remote_target_id" placeholder="选择群晖配置" clearable>
               <el-option v-for="t in remotes" :key="t.id" :label="`${t.name}（${t.host}）`" :value="t.id" />
@@ -414,7 +414,7 @@ async function probe() {
 
 async function save() {
   if (form.remote_enabled && !form.remote_target_id) {
-    ElMessage.warning("已开启远程备份，请选择群晖配置");
+    ElMessage.warning("已开启群晖备份，请选择群晖配置");
     return;
   }
   if (form.connect_mode === "ssh" && !form.ssh_proxy_id) {

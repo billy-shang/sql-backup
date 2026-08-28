@@ -11,7 +11,7 @@ from app.schemas import ScheduleIn, ScheduleOut
 from app.services import progress as prog
 from app.services import scheduler as sched_svc
 from app.services.backup import format_database_label
-from app.services.runner import execute_schedule_job
+from app.services.runner import execute_schedule_job, reconcile_stale_running
 
 log = logging.getLogger(__name__)
 
@@ -22,6 +22,8 @@ def _to_out(row: Schedule, conn: DbConnection | None) -> ScheduleOut:
     status = row.last_status or ""
     if not row.enabled:
         status = "paused"
+    elif prog.is_running(int(row.connection_id)):
+        status = "running"
     return ScheduleOut(
         id=row.id,
         name=row.name,
@@ -61,6 +63,7 @@ def _apply(row: Schedule, body: ScheduleIn) -> None:
 
 @router.get("")
 def list_schedules(_user: CurrentUser, db: DbSess) -> dict:
+    reconcile_stale_running(db)
     rows = db.query(Schedule).order_by(Schedule.id.desc()).all()
     cmap = {c.id: c for c in db.query(DbConnection).all()}
     return {"ok": True, "items": [_to_out(r, cmap.get(r.connection_id)).model_dump() for r in rows]}
@@ -131,6 +134,9 @@ def run_schedule_now(sid: int, _admin: AdminUser, db: DbSess) -> dict:
     cid = int(row.connection_id)
     if prog.is_running(cid):
         raise HTTPException(status_code=409, detail="该连接正在备份或恢复，请稍后再试")
+    row.last_status = "running"
+    row.last_error = ""
+    db.commit()
     threading.Thread(target=execute_schedule_job, args=(sid,), kwargs={"ignore_enabled": True}, daemon=True).start()
     log.info("[schedules] 手动执行任务 #%s cid=%s", sid, cid)
     return {"ok": True, "started": True, "connection_id": cid}

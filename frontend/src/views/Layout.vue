@@ -137,7 +137,7 @@
       <section>
         <h3>配置中心</h3>
         <ul>
-          <li>远程备份：群晖 File Station 地址、账号、远程目录</li>
+          <li>群晖备份：群晖 File Station 地址、账号、远程目录</li>
           <li>SSH 代理：跳板机地址、账号、密码或私钥。多条连接可共用同一跳板</li>
           <li>通知：飞书 / 企业微信 / 钉钉 Webhook，可同时启用</li>
           <li>新增或编辑连接时，像选群晖一样下拉选择，不必再手填</li>
@@ -145,7 +145,7 @@
       </section>
       <section>
         <h3>群晖归档</h3>
-        <p>在「配置中心」→「远程备份」填写 File Station 地址（HTTP 5000 / HTTPS 5001）和远程目录。上传路径为：</p>
+        <p>在「配置中心」→「群晖备份」填写 File Station 地址（HTTP 5000 / HTTPS 5001）和远程目录。上传路径为：</p>
         <pre>/fileserver/DB_BackUP/{连接名}/{库名}/{日期}/文件.bak</pre>
         <p>只走 File Station，不走 22 端口。大文件会分块从 SQL Server 读取再上传。</p>
       </section>

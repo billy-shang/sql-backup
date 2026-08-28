@@ -128,6 +128,11 @@ def _bootstrap() -> None:
             db.commit()
             log.info("[boot] 已创建默认管理员 %s", DEFAULT_ADMIN_USER)
         _migrate_inline_ssh(db)
+        from app.services.runner import reconcile_stale_running
+
+        n = reconcile_stale_running(db)
+        if n:
+            log.info("[boot] 已纠正 %s 条残留「运行中」定时任务", n)
         sched_svc.start(db)
     finally:
         db.close()

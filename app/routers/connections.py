@@ -60,7 +60,7 @@ def _apply(row: DbConnection, body: ConnectionIn, db, *, is_new: bool) -> None:
     row.remote_enabled = bool(body.remote_enabled)
     row.remote_target_id = int(body.remote_target_id or 0) if body.remote_enabled else 0
     if body.remote_enabled and not row.remote_target_id:
-        raise HTTPException(status_code=400, detail="请选择远程备份（群晖）配置")
+        raise HTTPException(status_code=400, detail="请选择群晖备份配置")
     if body.password:
         row.password_enc = encrypt_secret(body.password)
     elif is_new:

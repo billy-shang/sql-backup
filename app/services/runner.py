@@ -136,23 +136,7 @@ def execute_backup(
             )
         )
         prog.mark_db_done(connection_id, name, i + 1, total)
-    if schedule_id:
-        sch = db.query(Schedule).filter(Schedule.id == schedule_id).one_or_none()
-        if sch:
-            failed = [r for r in recs if r.status == "failed"]
-            if not recs:
-                sch.last_status = "failed"
-                sch.last_error = "没有可备份的数据库"
-            elif failed and len(failed) == len(recs):
-                sch.last_status = "failed"
-                sch.last_error = failed[0].error_message
-            elif failed:
-                sch.last_status = "failed"
-                sch.last_error = "部分失败：" + "; ".join(f"{r.dbname}:{r.error_message}" for r in failed)[:1800]
-            else:
-                sch.last_status = "success"
-                sch.last_error = ""
-            db.commit()
+    _write_schedule_result(db, recs, schedule_id=schedule_id, connection_id=connection_id)
     try:
         notify_job_result(
             db,
@@ -166,6 +150,73 @@ def execute_backup(
     except Exception as e:  # noqa: BLE001
         log.warning("[runner] 汇总通知失败: %s", e)
     return recs
+
+
+def _result_for_recs(recs: list[BackupRecord]) -> tuple[str, str]:
+    failed = [r for r in recs if r.status == "failed"]
+    if not recs:
+        return "failed", "没有可备份的数据库"
+    if failed and len(failed) == len(recs):
+        return "failed", (failed[0].error_message or "备份失败")[:2000]
+    if failed:
+        return "failed", ("部分失败：" + "; ".join(f"{r.dbname}:{r.error_message}" for r in failed))[:1800]
+    return "success", ""
+
+
+def _write_schedule_result(
+    db: Session,
+    recs: list[BackupRecord],
+    *,
+    schedule_id: int | None,
+    connection_id: int,
+) -> None:
+    status, err = _result_for_recs(recs)
+    targets: list[Schedule] = []
+    if schedule_id:
+        sch = db.query(Schedule).filter(Schedule.id == schedule_id).one_or_none()
+        if sch:
+            targets.append(sch)
+    else:
+        # 连接页手动备份也要清掉同连接定时任务上残留的「运行中」
+        targets = (
+            db.query(Schedule)
+            .filter(Schedule.connection_id == connection_id, Schedule.last_status == "running")
+            .all()
+        )
+    for sch in targets:
+        sch.last_status = status
+        sch.last_error = err
+    if targets:
+        db.commit()
+
+
+def reconcile_stale_running(db: Session) -> int:
+    """进程重启后 last_status 会停在 running，按最新备份记录纠正。"""
+    rows = db.query(Schedule).filter(Schedule.last_status == "running").all()
+    n = 0
+    for sch in rows:
+        if prog.is_running(int(sch.connection_id)):
+            continue
+        latest = (
+            db.query(BackupRecord)
+            .filter(BackupRecord.connection_id == sch.connection_id, BackupRecord.status != "running")
+            .order_by(BackupRecord.id.desc())
+            .first()
+        )
+        if latest is None:
+            sch.last_status = "failed"
+            sch.last_error = "任务已中断（进程重启或异常退出）"
+        elif latest.status == "success":
+            sch.last_status = "success"
+            sch.last_error = ""
+        else:
+            sch.last_status = "failed"
+            sch.last_error = (latest.error_message or "备份失败")[:2000]
+        n += 1
+        log.info("[runner] 清理残留运行中 sid=%s cid=%s -> %s", sch.id, sch.connection_id, sch.last_status)
+    if n:
+        db.commit()
+    return n
 
 
 def _finish_schedule_progress(cid: int, recs: list[BackupRecord]) -> None:

@@ -58,7 +58,7 @@ def create_target(_admin: AdminUser, body: RemoteTargetIn, db: DbSess) -> dict:
 def update_target(tid: int, _admin: AdminUser, body: RemoteTargetIn, db: DbSess) -> dict:
     row = db.query(RemoteTarget).filter(RemoteTarget.id == tid).one_or_none()
     if not row:
-        raise HTTPException(status_code=404, detail="远程备份配置不存在")
+        raise HTTPException(status_code=404, detail="群晖备份配置不存在")
     _apply(row, body, is_new=False)
     db.commit()
     db.refresh(row)
@@ -69,7 +69,7 @@ def update_target(tid: int, _admin: AdminUser, body: RemoteTargetIn, db: DbSess)
 def delete_target(tid: int, _admin: AdminUser, db: DbSess) -> dict:
     row = db.query(RemoteTarget).filter(RemoteTarget.id == tid).one_or_none()
     if not row:
-        raise HTTPException(status_code=404, detail="远程备份配置不存在")
+        raise HTTPException(status_code=404, detail="群晖备份配置不存在")
     for conn in db.query(DbConnection).filter(DbConnection.remote_target_id == tid).all():
         conn.remote_target_id = 0
         conn.remote_enabled = False

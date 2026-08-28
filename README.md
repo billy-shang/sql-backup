@@ -79,7 +79,7 @@
     <td align="center" width="50%"><strong>定时任务</strong><br/><img src="IMAGE/4定时任务.png" alt="定时任务" /></td>
   </tr>
   <tr>
-    <td align="center" width="50%"><strong>远程备份 · 群晖</strong><br/><img src="IMAGE/5-1配置中心-群晖.png" alt="群晖远程备份" /></td>
+    <td align="center" width="50%"><strong>群晖备份</strong><br/><img src="IMAGE/5-1配置中心-群晖.png" alt="群晖备份" /></td>
     <td align="center" width="50%"><strong>SSH 代理</strong><br/><img src="IMAGE/5-2配置中心-SSH代理.png" alt="SSH代理" /></td>
   </tr>
   <tr>
@@ -104,7 +104,7 @@ docker run -d \
   -e TZ=Asia/Shanghai \
   -e SQL_BACKUP_DATA_DIR=/data \
   -v "$PWD/data:/data" \
-  billyshang/sql-backup:v1.0.51
+  billyshang/sql-backup:v1.0.52
 ```
 
 部署完成后访问：
@@ -274,7 +274,7 @@ billyshang/sql-backup
 拉取当前版本：
 
 ```bash
-docker pull billyshang/sql-backup:v1.0.51
+docker pull billyshang/sql-backup:v1.0.52
 ```
 
 查看镜像：

@@ -75,7 +75,7 @@ def upload_backup_to_remote(
         return ""
     target = db.query(RemoteTarget).filter(RemoteTarget.id == conn_row.remote_target_id).one_or_none()
     if not target:
-        raise RuntimeError("未找到远程备份配置，请先在「配置中心」添加群晖")
+        raise RuntimeError("未找到群晖备份配置，请先在「配置中心」添加群晖")
     password = decrypt_secret(target.password_enc)
     if not password:
         raise RuntimeError("群晖密码为空，请到「配置中心」重新保存")

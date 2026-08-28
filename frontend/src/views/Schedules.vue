@@ -205,9 +205,21 @@ async function runNow(row) {
   try {
     await http.post(`/schedules/${row.id}/run`);
     ElMessage.success("已开始执行，进度在「数据库连接」页查看");
+    row.last_status = "running";
+    pollUntilIdle();
   } catch (e) {
     ElMessage.error(errMsg(e));
   }
+}
+
+function pollUntilIdle() {
+  let n = 0;
+  const t = setInterval(async () => {
+    n += 1;
+    await load();
+    const busy = items.value.some((r) => r.last_status === "running");
+    if (!busy || n > 240) clearInterval(t);
+  }, 5000);
 }
 
 async function pause(row) {

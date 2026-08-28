@@ -8,9 +8,9 @@
     </div>
 
     <el-tabs v-model="tab">
-      <el-tab-pane v-if="admin" label="远程备份" name="remote">
+      <el-tab-pane v-if="admin" label="群晖备份" name="remote">
         <div class="tab-toolbar">
-          <div class="muted">群晖 File Station 地址、账号和远程目录。连接里勾选「是否远程备份」后即可选用。</div>
+          <div class="muted">群晖 File Station 地址、账号和远程目录。连接里勾选「是否群晖备份」后即可选用。</div>
           <el-button type="primary" @click="openRemoteEdit()">新增群晖</el-button>
         </div>
         <el-table :data="remotes" stripe v-loading="remoteLoading" class="fit-table" table-layout="fixed" empty-text="暂无群晖配置">
@@ -259,7 +259,7 @@ async function saveRemote() {
 }
 
 async function removeRemote(row) {
-  await ElMessageBox.confirm(`确认删除群晖配置「${row.name}」？已选用的连接会关闭远程备份。`, "删除", {
+  await ElMessageBox.confirm(`确认删除群晖配置「${row.name}」？已选用的连接会关闭群晖备份。`, "删除", {
     type: "warning",
     confirmButtonText: "删除",
     cancelButtonText: "取消",
