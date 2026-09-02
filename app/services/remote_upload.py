@@ -234,7 +234,7 @@ def _ps_encoded_cmd(script: str) -> str:
 def _sql_run(dbc: Any, cmd: str) -> list[str]:
     lines = xp_cmdshell_lines(dbc, cmd)
     if lines:
-        log.info("[remote] xp_cmdshell 输出: %s", " | ".join(lines)[:500])
+        log.info("[remote] xp_cmdshell 输出: %s", " | ".join(lines)[:1200])
     return lines
 
 
@@ -279,137 +279,219 @@ def _sql_write_text_file(dbc: Any, dest: str, text: str) -> None:
 
 
 def _upload_ps_script(syno: dict[str, Any], src: str, dest_dir: str, filename: str) -> str:
-    """SQL 本机直传脚本：只用 PowerShell 2 / .NET 2 API，Windows 2008～2019 都能跑。"""
+    """SQL 本机直传：PowerShell 2 / .NET 2。成功必须以群晖 list/getinfo 看到文件为准。"""
     scheme = "https" if syno.get("https") else "http"
     base = f"{scheme}://{syno['host']}:{int(syno['port'])}"
-    return f"""
-$ErrorActionPreference = 'Stop'
-if ($PSVersionTable -and [int]$PSVersionTable.PSVersion.Major -ge 3) {{ $ProgressPreference = 'SilentlyContinue' }}
-try {{ [Net.ServicePointManager]::ServerCertificateValidationCallback = {{ $true }} }} catch {{}}
-try {{ [Net.ServicePointManager]::Expect100Continue = $false }} catch {{}}
-try {{ [Net.WebRequest]::DefaultWebProxy = $null }} catch {{}}
-foreach ($p in @(4080, 3072, 192, 48)) {{
-  try {{ [Net.ServicePointManager]::SecurityProtocol = $p; break }} catch {{}}
-}}
-$noproxy = $null
-try {{ $noproxy = [Net.GlobalProxySelection]::GetEmptyWebProxy() }} catch {{}}
-$base = {_ps_lit(base)}
-$user = {_ps_lit(str(syno.get("username") or ""))}
-$pass = {_ps_lit(str(syno.get("password") or ""))}
-$src = {_ps_lit(src)}
-$dest = {_ps_lit(dest_dir.replace("\\\\", "/").rstrip("/"))}
-$fn = {_ps_lit(filename)}
-if (-not [IO.File]::Exists($src)) {{ throw ('file not found ' + $src) }}
-Write-Output ('SQLBAK_PS=' + [string]$PSVersionTable.PSVersion)
-function Enc([string]$s) {{ return [Uri]::EscapeDataString($s) }}
-function HttpLogin([string]$loginUrl, [string]$form) {{
-  $wc = New-Object System.Net.WebClient
-  if ($noproxy) {{ $wc.Proxy = $noproxy }}
-  $wc.Headers.Add('Content-Type','application/x-www-form-urlencoded')
-  $bytes = [Text.Encoding]::UTF8.GetBytes($form)
-  $txt = [Text.Encoding]::UTF8.GetString($wc.UploadData($loginUrl, 'POST', $bytes))
-  $wc.Dispose()
-  return $txt
-}}
-$curlExe = ''
-try {{
-  $cmd = Get-Command curl.exe -ErrorAction SilentlyContinue
-  if ($cmd -ne $null) {{
-    $p = [string]$cmd.Path
-    if (-not $p) {{ $p = [string]$cmd.Definition }}
-    if ($p -like '*curl.exe') {{ $curlExe = $p }}
-  }}
-}} catch {{}}
-Write-Output ('SQLBAK_CURL=' + $curlExe)
-$sid = ''
-$tok = ''
-$txt = ''
-foreach ($ver in @('7','6','3','2')) {{
-  $loginUrl = $base + '/webapi/auth.cgi'
-  $form = 'api=SYNO.API.Auth&version=' + $ver + '&method=login&account=' + (Enc $user) + '&passwd=' + (Enc $pass) + '&session=FileStation&format=sid&enable_syno_token=yes'
-  $txt = ''
-  if ($curlExe) {{
-    try {{ $txt = & $curlExe -sS -k --noproxy '*' --connect-timeout 20 -X POST $loginUrl -d $form }} catch {{ $txt = '' }}
-  }}
-  if (-not $txt) {{ $txt = HttpLogin $loginUrl $form }}
-  if ($txt -match '"sid"\\s*:\\s*"([^"]+)"') {{
-    $sid = $Matches[1]
-    if ($txt -match '"synotoken"\\s*:\\s*"([^"]+)"') {{ $tok = $Matches[1] }}
-    break
-  }}
-}}
-if (-not $sid) {{ throw ('synology login fail ' + $txt) }}
-$u = $base + '/webapi/entry.cgi?api=SYNO.FileStation.Upload&version=2&method=upload&_sid=' + $sid
-$out = ''
-$usedCurl = $false
-if ($curlExe) {{
-  try {{
-    $cargs = @('-sS','-k','--noproxy','*','--connect-timeout','20','--max-time','28800','-X','POST',$u,
-      '-F',('path=' + $dest),'-F','create_parents=true','-F','overwrite=true',
-      '-F',('file=@' + $src + ';filename=' + $fn))
-    if ($tok) {{ $cargs += @('-H',('X-SYNO-TOKEN: ' + $tok)) }}
-    $out = & $curlExe @cargs
-    $usedCurl = $true
-  }} catch {{
-    $usedCurl = $false
-    $out = ''
-  }}
-}}
-if (-not $usedCurl) {{
-  $boundary = '----sqlbak' + [guid]::NewGuid().ToString('N')
-  $enc = [Text.Encoding]::UTF8
-  $CRLF = [char]13 + [char]10
-  function Part([string]$name, [string]$val) {{
-    return '--' + $boundary + $CRLF + 'Content-Disposition: form-data; name="' + $name + '"' + $CRLF + $CRLF + $val + $CRLF
-  }}
-  $pre = $enc.GetBytes((Part 'path' $dest) + (Part 'create_parents' 'true') + (Part 'overwrite' 'true') + '--' + $boundary + $CRLF + 'Content-Disposition: form-data; name="file"; filename="' + $fn + '"' + $CRLF + 'Content-Type: application/octet-stream' + $CRLF + $CRLF)
-  $post = $enc.GetBytes($CRLF + '--' + $boundary + '--' + $CRLF)
-  $fi = New-Object IO.FileInfo($src)
-  $req = [Net.HttpWebRequest]::Create($u)
-  $req.Method = 'POST'
-  if ($noproxy) {{ $req.Proxy = $noproxy }}
-  $req.Timeout = 28800000
-  try {{ $req.ReadWriteTimeout = 28800000 }} catch {{}}
-  $req.AllowWriteStreamBuffering = $false
-  $req.ContentType = 'multipart/form-data; boundary=' + $boundary
-  $req.ContentLength = $pre.Length + $fi.Length + $post.Length
-  if ($tok) {{ $req.Headers.Add('X-SYNO-TOKEN', $tok) }}
-  $rs = $req.GetRequestStream()
-  $rs.Write($pre, 0, $pre.Length)
-  $fs = $fi.OpenRead()
-  $buf = New-Object byte[] 65536
-  while (($n = $fs.Read($buf, 0, $buf.Length)) -gt 0) {{ $rs.Write($buf, 0, $n) }}
-  $fs.Close()
-  $rs.Write($post, 0, $post.Length)
-  $rs.Close()
-  try {{
-    $resp = $req.GetResponse()
-    $sr = New-Object IO.StreamReader($resp.GetResponseStream())
-    $out = $sr.ReadToEnd()
-    $sr.Close(); $resp.Close()
-  }} catch {{
-    $ex = $_.Exception
-    if ($ex.Response) {{
-      $sr = New-Object IO.StreamReader($ex.Response.GetResponseStream())
-      $out = $sr.ReadToEnd(); $sr.Close()
-      throw ('http ' + $out)
-    }}
-    throw
-  }}
-}}
-Write-Output $out
-if ($out -match '"success"\\s*:\\s*true') {{ Write-Output 'SQLBAK_UP_OK' }} else {{ throw ('upload fail ' + $out) }}
-""".strip() + "\n"
+    dest = dest_dir.replace("\\", "/").rstrip("/")
+    # 不用 f-string 包整段脚本，避免 PowerShell 花括号被 Python 吃掉
+    lines = [
+        "$ErrorActionPreference = 'Stop'",
+        "if ($PSVersionTable -and [int]$PSVersionTable.PSVersion.Major -ge 3) { $ProgressPreference = 'SilentlyContinue' }",
+        "try { [Net.ServicePointManager]::ServerCertificateValidationCallback = { $true } } catch {}",
+        "try { [Net.ServicePointManager]::Expect100Continue = $false } catch {}",
+        "try { [Net.WebRequest]::DefaultWebProxy = $null } catch {}",
+        "foreach ($p in @(4080, 3072, 192, 48)) { try { [Net.ServicePointManager]::SecurityProtocol = $p; break } catch {} }",
+        "$noproxy = $null",
+        "$tok = ''",
+        "$sid = ''",
+        "$lastInfo = ''",
+        "try { $noproxy = [Net.GlobalProxySelection]::GetEmptyWebProxy() } catch {}",
+        f"$base = {_ps_lit(base)}",
+        f"$user = {_ps_lit(str(syno.get('username') or ''))}",
+        f"$pass = {_ps_lit(str(syno.get('password') or ''))}",
+        f"$src = {_ps_lit(src)}",
+        f"$dest = {_ps_lit(dest)}",
+        f"$fn = {_ps_lit(filename)}",
+        "if (-not [IO.File]::Exists($src)) { throw ('file not found ' + $src) }",
+        "Write-Output ('SQLBAK_PS=' + [string]$PSVersionTable.PSVersion)",
+        "function Enc([string]$s) { return [Uri]::EscapeDataString($s) }",
+        "function HttpText([string]$url, [string]$form) {",
+        "  $wc = New-Object System.Net.WebClient",
+        "  if ($noproxy) { $wc.Proxy = $noproxy }",
+        "  if ($tok) { $wc.Headers.Add('X-SYNO-TOKEN', $tok) }",
+        "  if ($form) {",
+        "    $wc.Headers.Add('Content-Type','application/x-www-form-urlencoded')",
+        "    $bytes = [Text.Encoding]::UTF8.GetBytes($form)",
+        "    $txt = [Text.Encoding]::UTF8.GetString($wc.UploadData($url, 'POST', $bytes))",
+        "  } else {",
+        "    $txt = $wc.DownloadString($url)",
+        "  }",
+        "  $wc.Dispose()",
+        "  return $txt",
+        "}",
+        "function NasHasFile {",
+        "  $full = $dest.TrimEnd('/') + '/' + $fn",
+        "  $pathJson = '["' + $full + '"]'",
+        "  $infoUrl = $base + '/webapi/entry.cgi?api=SYNO.FileStation.List&version=2&method=getinfo&path=' + (Enc $pathJson) + '&_sid=' + $sid",
+        "  $lst = ''",
+        "  try { $lst = HttpText $infoUrl $null } catch { $lst = '' }",
+        "  if ($lst -and $lst.Replace(' ', '').ToLower().IndexOf('\"code\":') -ge 0) { $lst = '' }",
+        "  if (-not $lst) {",
+        "    $listUrl = $base + '/webapi/entry.cgi?api=SYNO.FileStation.List&version=2&method=list&folder_path=' + (Enc $dest) + '&_sid=' + $sid",
+        "    try { $lst = HttpText $listUrl $null } catch { $lst = '' }",
+        "  }",
+        "  $script:lastInfo = $lst",
+        "  $needle = '\"name\":\"' + $fn + '\"'",
+        "  $compact = $lst.Replace(' ', '')",
+        "  if ($compact.ToLower().IndexOf($needle.ToLower()) -ge 0) { return $true }",
+        "  return $false",
+        "}",
+        "function BuildMultipart([string]$boundary) {",
+        "  $enc = [Text.Encoding]::UTF8",
+        "  $CRLF = [char]13 + [char]10",
+        "  function Part([string]$name, [string]$val) {",
+        "    return '--' + $boundary + $CRLF + 'Content-Disposition: form-data; name=\"' + $name + '\"' + $CRLF + $CRLF + $val + $CRLF",
+        "  }",
+        "  $head = (Part 'api' 'SYNO.FileStation.Upload') + (Part 'version' '2') + (Part 'method' 'upload') + (Part 'path' $dest) + (Part 'create_parents' 'true') + (Part 'overwrite' 'true')",
+        "  $head = $head + '--' + $boundary + $CRLF + 'Content-Disposition: form-data; name=\"file\"; filename=\"' + $fn + '\"' + $CRLF + 'Content-Type: application/octet-stream' + $CRLF + $CRLF",
+        "  $pre = $enc.GetBytes($head)",
+        "  $post = $enc.GetBytes($CRLF + '--' + $boundary + '--' + $CRLF)",
+        "  return @($pre, $post)",
+        "}",
+        "function UploadWebClient {",
+        "  $boundary = '----sqlbak' + [guid]::NewGuid().ToString('N')",
+        "  $parts = BuildMultipart $boundary",
+        "  $pre = $parts[0]; $post = $parts[1]",
+        "  $fi = New-Object IO.FileInfo($src)",
+        "  $fs = $fi.OpenRead()",
+        "  $fileBytes = New-Object byte[] $fi.Length",
+        "  [void]$fs.Read($fileBytes, 0, $fileBytes.Length)",
+        "  $fs.Close()",
+        "  $body = New-Object byte[] ($pre.Length + $fileBytes.Length + $post.Length)",
+        "  [Array]::Copy($pre, 0, $body, 0, $pre.Length)",
+        "  [Array]::Copy($fileBytes, 0, $body, $pre.Length, $fileBytes.Length)",
+        "  [Array]::Copy($post, 0, $body, ($pre.Length + $fileBytes.Length), $post.Length)",
+        "  $wc = New-Object System.Net.WebClient",
+        "  if ($noproxy) { $wc.Proxy = $noproxy }",
+        "  $wc.Headers.Add('Content-Type', ('multipart/form-data; boundary=' + $boundary))",
+        "  if ($tok) { $wc.Headers.Add('X-SYNO-TOKEN', $tok) }",
+        "  $respBytes = $wc.UploadData($u, 'POST', $body)",
+        "  $wc.Dispose()",
+        "  return [Text.Encoding]::UTF8.GetString($respBytes)",
+        "}",
+        "function UploadStream {",
+        "  $boundary = '----sqlbak' + [guid]::NewGuid().ToString('N')",
+        "  $parts = BuildMultipart $boundary",
+        "  $pre = $parts[0]; $post = $parts[1]",
+        "  $fi = New-Object IO.FileInfo($src)",
+        "  $req = [Net.HttpWebRequest]::Create($u)",
+        "  $req.Method = 'POST'",
+        "  if ($noproxy) { $req.Proxy = $noproxy }",
+        "  $req.Timeout = 28800000",
+        "  try { $req.ReadWriteTimeout = 28800000 } catch {}",
+        "  $req.AllowWriteStreamBuffering = $true",
+        "  $req.ContentType = 'multipart/form-data; boundary=' + $boundary",
+        "  $req.ContentLength = $pre.Length + $fi.Length + $post.Length",
+        "  if ($tok) { $req.Headers.Add('X-SYNO-TOKEN', $tok) }",
+        "  $rs = $req.GetRequestStream()",
+        "  $rs.Write($pre, 0, $pre.Length)",
+        "  $fs = $fi.OpenRead()",
+        "  $buf = New-Object byte[] 65536",
+        "  while (($n = $fs.Read($buf, 0, $buf.Length)) -gt 0) { $rs.Write($buf, 0, $n) }",
+        "  $fs.Close()",
+        "  $rs.Write($post, 0, $post.Length)",
+        "  $rs.Close()",
+        "  $resp = $req.GetResponse()",
+        "  $sr = New-Object IO.StreamReader($resp.GetResponseStream())",
+        "  $txt = $sr.ReadToEnd()",
+        "  $sr.Close(); $resp.Close()",
+        "  return $txt",
+        "}",
+        "$curlExe = ''",
+        "$tok = ''",
+        "$lastInfo = ''",
+        "try {",
+        "  $cmd = Get-Command curl.exe -ErrorAction SilentlyContinue",
+        "  if ($cmd -ne $null) {",
+        "    $p = [string]$cmd.Path",
+        "    if (-not $p) { $p = [string]$cmd.Definition }",
+        "    if ($p -like '*curl.exe') { $curlExe = $p }",
+        "  }",
+        "} catch {}",
+        "Write-Output ('SQLBAK_CURL=' + $curlExe)",
+        "$sid = ''",
+        "$txt = ''",
+        "foreach ($ver in @('7','6','3','2')) {",
+        "  $loginUrl = $base + '/webapi/auth.cgi'",
+        "  $form = 'api=SYNO.API.Auth&version=' + $ver + '&method=login&account=' + (Enc $user) + '&passwd=' + (Enc $pass) + '&session=FileStation&format=sid&enable_syno_token=yes'",
+        "  $txt = ''",
+        "  if ($curlExe) { try { $txt = & $curlExe -sS -k --noproxy '*' --connect-timeout 20 -X POST $loginUrl -d $form } catch { $txt = '' } }",
+        "  if (-not $txt) { $txt = HttpText $loginUrl $form }",
+        "  if ($txt -match '\"sid\"\\s*:\\s*\"([^\"]+)\"') {",
+        "    $sid = $Matches[1]",
+        "    if ($txt -match '\"synotoken\"\\s*:\\s*\"([^\"]+)\"') { $tok = $Matches[1] }",
+        "    break",
+        "  }",
+        "}",
+        "if (-not $sid) { throw ('synology login fail ' + $txt) }",
+        "Write-Output 'SQLBAK_LOGIN_OK'",
+        "$cut = $dest.LastIndexOf('/')",
+        "if ($cut -gt 0) {",
+        "  $parent = $dest.Substring(0, $cut)",
+        "  $leaf = $dest.Substring($cut + 1)",
+        "  $mk = $base + '/webapi/entry.cgi?api=SYNO.FileStation.CreateFolder&version=2&method=create&folder_path=' + (Enc $parent) + '&name=' + (Enc $leaf) + '&force_parent=true&_sid=' + $sid",
+        "  try { $null = HttpText $mk $null } catch {}",
+        "}",
+        "$u = $base + '/webapi/entry.cgi?_sid=' + $sid",
+        "$out = ''",
+        "if ($curlExe) {",
+        "  try {",
+        "    $cargs = @('-sS','-k','--noproxy','*','--connect-timeout','20','--max-time','28800','-X','POST',$u,",
+        "      '-F','api=SYNO.FileStation.Upload','-F','version=2','-F','method=upload',",
+        "      '-F',('path=' + $dest),'-F','create_parents=true','-F','overwrite=true',",
+        "      '-F',('file=@' + $src + ';filename=' + $fn))",
+        "    if ($tok) { $cargs += @('-H',('X-SYNO-TOKEN: ' + $tok)) }",
+        "    $out = & $curlExe @cargs",
+        "    Write-Output ('SQLBAK_CURL_JSON=' + $out)",
+        "  } catch { $out = '' }",
+        "}",
+        "if (NasHasFile) {",
+        "  Write-Output ('SQLBAK_INFO=' + $lastInfo)",
+        "  Write-Output 'SQLBAK_UP_OK'",
+        "  Write-Output ('SQLBAK_FILE=' + $fn)",
+        "  return",
+        "}",
+        "Write-Output ('SQLBAK_INFO=' + $lastInfo)",
+        "$fi = New-Object IO.FileInfo($src)",
+        "Write-Output ('SQLBAK_SIZE=' + [string]$fi.Length)",
+        "if ($fi.Length -le 33554432) {",
+        "  try { $out = UploadWebClient; Write-Output ('SQLBAK_WC_JSON=' + $out) } catch { Write-Output ('SQLBAK_WC_ERR=' + $_.Exception.Message) }",
+        "} else {",
+        "  try { $out = UploadStream; Write-Output ('SQLBAK_STREAM_JSON=' + $out) } catch { Write-Output ('SQLBAK_STREAM_ERR=' + $_.Exception.Message) }",
+        "}",
+        "if (NasHasFile) {",
+        "  Write-Output ('SQLBAK_INFO=' + $lastInfo)",
+        "  Write-Output 'SQLBAK_UP_OK'",
+        "  Write-Output ('SQLBAK_FILE=' + $fn)",
+        "  return",
+        "}",
+        "Write-Output ('SQLBAK_INFO=' + $lastInfo)",
+        "if ($fi.Length -le 33554432) {",
+        "  try { $out = UploadStream; Write-Output ('SQLBAK_STREAM_JSON=' + $out) } catch { Write-Output ('SQLBAK_STREAM_ERR=' + $_.Exception.Message) }",
+        "  if (NasHasFile) {",
+        "    Write-Output ('SQLBAK_INFO=' + $lastInfo)",
+        "    Write-Output 'SQLBAK_UP_OK'",
+        "    Write-Output ('SQLBAK_FILE=' + $fn)",
+        "    return",
+        "  }",
+        "  Write-Output ('SQLBAK_INFO=' + $lastInfo)",
+        "}",
+        "throw ('nas missing file after upload ' + $out)",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def _parse_syno_upload_ok(lines: list[str], dest_dir: str, filename: str) -> str:
-    text = "\n".join(lines or [])
+    """只有脚本在群晖上确认文件存在后才算成功，忽略登录 JSON 的 success:true。"""
     remote = dest_dir.rstrip("/") + "/" + filename
-    if any("SQLBAK_UP_OK" in x for x in (lines or [])):
+    wanted = f"SQLBAK_FILE={filename}"
+    has_ok = any((x or "").strip() == "SQLBAK_UP_OK" for x in (lines or []))
+    has_file = any((x or "").strip() == wanted for x in (lines or []))
+    if has_ok and has_file:
+        log.info("[remote] 直传已在群晖确认文件 %s", remote)
         return remote
-    compact = text.replace(" ", "")
-    if '"success":true' in compact:
-        return remote
+    text = "\n".join(lines or [])
+    log.warning("[remote] 直传未确认到文件 dest=%s out=%s", remote, text[:1500])
     raise RuntimeError((text or "群晖直传无输出")[:800])
 
 

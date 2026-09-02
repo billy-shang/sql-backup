@@ -196,11 +196,62 @@ class SynologyClient:
                 continue
             if body.get("success"):
                 remote = posixpath.join(dest_dir, filename)
-                log.info("[synology] 已上传 %s", remote)
-                return remote
+                if self.file_on_nas(dest_dir, filename):
+                    log.info("[synology] 已上传并确认 %s", remote)
+                    return remote
+                last = RuntimeError("群晖返回 success 但目录里没有文件")
+                log.info("[synology] 上传 version=%s 未确认到文件 %s", ver, remote)
+                continue
             last = RuntimeError(_err_text(body))
             log.info("[synology] 上传 version=%s 失败: %s", ver, last)
         raise RuntimeError(f"群晖上传失败：{last}")
+
+    def file_on_nas(self, dest_dir: str, filename: str) -> bool:
+        """上传 success 不够，必须能 list/getinfo 到文件名。"""
+        dest_dir = _fs_path(dest_dir)
+        remote = posixpath.join(dest_dir, filename)
+        try:
+            resp = self._client.get(
+                f"{_base_url(self.host, self.port, self.https)}/webapi/entry.cgi",
+                params={
+                    "api": "SYNO.FileStation.List",
+                    "version": "2",
+                    "method": "getinfo",
+                    "path": json.dumps([remote]),
+                    "_sid": self.sid,
+                },
+                headers=self._headers(),
+            )
+            data = resp.json()
+            for item in ((data.get("data") or {}).get("files") or []):
+                if item.get("code"):
+                    continue
+                if str(item.get("name") or "") == filename:
+                    log.info("[synology] getinfo 确认文件 %s", remote)
+                    return True
+        except Exception as e:  # noqa: BLE001
+            log.info("[synology] getinfo 失败 %s: %s", remote, e)
+        try:
+            resp = self._client.get(
+                f"{_base_url(self.host, self.port, self.https)}/webapi/entry.cgi",
+                params={
+                    "api": "SYNO.FileStation.List",
+                    "version": "2",
+                    "method": "list",
+                    "folder_path": dest_dir,
+                    "_sid": self.sid,
+                },
+                headers=self._headers(),
+            )
+            data = resp.json()
+            for item in ((data.get("data") or {}).get("files") or []):
+                if str(item.get("name") or "") == filename:
+                    log.info("[synology] list 确认文件 %s", remote)
+                    return True
+        except Exception as e:  # noqa: BLE001
+            log.info("[synology] list 失败 %s: %s", dest_dir, e)
+        log.info("[synology] 未在群晖确认到文件 %s", remote)
+        return False
 
     def list_names(self, folder: str) -> list[str]:
         resp = self._client.get(

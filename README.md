@@ -104,7 +104,7 @@ docker run -d \
   -e TZ=Asia/Shanghai \
   -e SQL_BACKUP_DATA_DIR=/data \
   -v "$PWD/data:/data" \
-  billyshang/sql-backup:v1.0.54
+  billyshang/sql-backup:v1.0.55
 ```
 
 部署完成后访问：
@@ -225,8 +225,11 @@ Windows 上的 `.bak` **一律先由 SQL 本机直传群晖**（上传脚本会�
 
 - 只用 .NET 2 / PowerShell 2 API（`WebClient`、`HttpWebRequest`），不调用 `Invoke-RestMethod`
 - 脚本写成 UTF-16（带 BOM），PowerShell 2 的 `-File` 不会按 ANSI/GBK 解坏
-- 没有 `curl.exe`（2008）时自动走 `WebClient`；有 `curl.exe`（2016+）时优先用，失败再回退
+- 没有 `curl.exe`（2008）时：小文件（≤32MB）走 `WebClient.UploadData` 整包 multipart，大文件再走 `HttpWebRequest` 流式；有 `curl.exe`（2016+）时优先用，失败再回退
 - 强制不走 IE/WinHTTP 代理，避免 SQL 服务账号和管理员窗口行为不一致
+- **归档成功必须以 File Station list/getinfo 看到文件名为准**，不再把登录 JSON 的 `success:true` 当成已上传
+
+同一台群晖可以同时有内网 IP 和公网域名（例如 `192.168.0.6` 与 `downtown.uniquexm.cn`）。SQL 机在该站点内网时应填内网 IP，避免 Hairpin NAT；平台在别的站点时，代传请用平台能访问的公网域名。传到内网 IP 的文件，用公网域名打开 File Station 也能看到（同一台）。
 
 如果通知是「备份部分成功 / 群晖归档失败」，优先检查：
 
@@ -292,7 +295,7 @@ billyshang/sql-backup
 拉取当前版本：
 
 ```bash
-docker pull billyshang/sql-backup:v1.0.54
+docker pull billyshang/sql-backup:v1.0.55
 ```
 
 查看镜像：
