@@ -26,7 +26,6 @@ from app.services.ssh_util import ssh_params
 from app.services import progress as prog
 from app.services.synology import (
     cleanup_synology_days,
-    ensure_remote_dir,
     test_synology,
     upload_to_synology,
 )
@@ -111,40 +110,26 @@ def upload_backup_to_remote(
         prog.set_message(int(conn_row.id), f"正在上传群晖 {dbname} {size_mb}MB", dbname)
     except Exception:  # noqa: BLE001
         pass
-    dest_dir = ""
-    try:
-        dest_dir = ensure_remote_dir(
-            host=syno["host"],
-            port=syno["port"],
-            username=syno["username"],
-            password=syno["password"],
-            https=syno["https"],
-            remote_dir=syno["remote_dir"],
-            dest_subdir=dest_subdir,
-        )
-    except Exception as e:  # noqa: BLE001
-        log.warning("[remote] 平台预建群晖目录失败，上传时再创建: %s", e)
+    dest_dir = f"{(syno['remote_dir'] or '').rstrip('/')}/{dest_subdir}".replace("\\", "/")
     staged: Path | None = None
     local = _existing_local(rec)
     try:
         remote = ""
-        if _is_windows_path(src_path) and not local:
+        # Windows SQL：一律先本机直传，平台预建目录会浪费时间且可能 No route
+        if _is_windows_path(src_path):
+            log.info("[remote] 先走 SQL 本机直传 %s size=%s", src_path, rec.file_size or 0)
             try:
                 remote = _upload_via_sql_direct(
                     conn_row,
                     src_path,
                     syno,
-                    dest_dir or f"{(syno['remote_dir'] or '').rstrip('/')}/{dest_subdir}",
+                    dest_dir,
                     filename,
                     int(rec.file_size or 0),
                 )
                 log.info("[remote] SQL 本机直传群晖成功 %s", remote)
             except Exception as e:  # noqa: BLE001
-                log.warning("[remote] SQL 本机直传失败: %s", e)
-                if int(rec.file_size or 0) > _MAX_SQL_BLOB:
-                    raise RuntimeError(
-                        f"SQL 本机直传失败，已取消平台中转（大文件分块会极慢）：{e}"
-                    ) from e
+                log.warning("[remote] SQL 本机直传失败，改走平台代传: %s", e)
         if not remote:
             if not local:
                 staged = _stage_remote_file(conn_row, rec)

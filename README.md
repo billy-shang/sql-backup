@@ -104,7 +104,7 @@ docker run -d \
   -e TZ=Asia/Shanghai \
   -e SQL_BACKUP_DATA_DIR=/data \
   -v "$PWD/data:/data" \
-  billyshang/sql-backup:v1.0.52
+  billyshang/sql-backup:v1.0.53
 ```
 
 部署完成后访问：
@@ -218,6 +218,17 @@ Synology NAS
 
 因此 SQL Server 所在服务器需要能够直接访问群晖 File Station。
 
+Windows 上的 `.bak` **一律先由 SQL 本机直传群晖**（上传脚本会自己建目录），只有直传失败才改由平台代传。  
+不要先让平台预建目录：平台和 SQL 机往往不在同一网段，会先报 `No route to host` 再浪费一轮登录。
+
+如果通知是「备份部分成功 / 群晖归档失败」，优先检查：
+
+1. SQL Server 本机能否访问群晖 File Station（`主机:5000` 或 `主机:5001`）
+2. 群晖地址不要填公网域名做 Hairpin（内网机器访问自己的公网域名常会「无法连接到远程服务器」），应填 SQL 机能直接访问的内网 IP
+3. Windows Server 2016 可能没有 `curl.exe`，直传会走 `WebClient`
+4. `.bak` 仍在 SQL 本机备份目录时，不必重备，到「备份文件」对失败记录点「重试归档」
+5. 群晖「内网 IP」只给 **SQL 机能直连** 的连接用。平台跑在别的站点时，直传失败后的代传会报 `No route to host`；跨站点小库连接继续用平台能访问的公网域名
+
 ---
 
 ## 🔔 通知
@@ -274,7 +285,7 @@ billyshang/sql-backup
 拉取当前版本：
 
 ```bash
-docker pull billyshang/sql-backup:v1.0.52
+docker pull billyshang/sql-backup:v1.0.53
 ```
 
 查看镜像：
