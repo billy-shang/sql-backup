@@ -115,6 +115,7 @@ def upload_backup_to_remote(
     local = _existing_local(rec)
     try:
         remote = ""
+        direct_err = ""
         # Windows SQL：一律先本机直传，平台预建目录会浪费时间且可能 No route
         if _is_windows_path(src_path):
             log.info("[remote] 先走 SQL 本机直传 %s size=%s", src_path, rec.file_size or 0)
@@ -129,27 +130,36 @@ def upload_backup_to_remote(
                 )
                 log.info("[remote] SQL 本机直传群晖成功 %s", remote)
             except Exception as e:  # noqa: BLE001
+                direct_err = str(e)
                 log.warning("[remote] SQL 本机直传失败，改走平台代传: %s", e)
         if not remote:
             if not local:
                 staged = _stage_remote_file(conn_row, rec)
                 local = staged
             if not local or not local.is_file():
-                raise RuntimeError(
+                msg = (
                     f"本地备份已完成，但平台读不到文件 {src_path}，无法上传群晖。"
                     "请确认平台能访问该备份盘，且群晖 File Station（HTTP 5000 / HTTPS 5001）网络互通。"
                 )
-            remote = upload_to_synology(
-                host=syno["host"],
-                port=syno["port"],
-                username=syno["username"],
-                password=syno["password"],
-                https=syno["https"],
-                remote_dir=syno["remote_dir"],
-                local_file=local,
-                dest_subdir=dest_subdir,
-                filename=filename,
-            )
+                if direct_err:
+                    msg = f"SQL 本机直传失败：{direct_err}；{msg}"
+                raise RuntimeError(msg)
+            try:
+                remote = upload_to_synology(
+                    host=syno["host"],
+                    port=syno["port"],
+                    username=syno["username"],
+                    password=syno["password"],
+                    https=syno["https"],
+                    remote_dir=syno["remote_dir"],
+                    local_file=local,
+                    dest_subdir=dest_subdir,
+                    filename=filename,
+                )
+            except Exception as e:  # noqa: BLE001
+                if direct_err:
+                    raise RuntimeError(f"SQL 本机直传失败：{direct_err}；平台代传失败：{e}") from e
+                raise
         log.info("[remote] 已上传群晖 %s", remote)
         if delete_old and retain_days > 0:
             parent = "/".join(dest_parts[:-1] if day else dest_parts)
@@ -218,7 +228,7 @@ def _ps_lit(value: str) -> str:
 def _ps_encoded_cmd(script: str) -> str:
     """PowerShell -EncodedCommand：UTF-16LE，不依赖本机临时文件。"""
     enc = base64.b64encode((script or "").encode("utf-16-le")).decode("ascii")
-    return "powershell.exe -NoProfile -NonInteractive -EncodedCommand " + enc
+    return _ps_exe() + " -EncodedCommand " + enc
 
 
 def _sql_run(dbc: Any, cmd: str) -> list[str]:
@@ -228,29 +238,36 @@ def _sql_run(dbc: Any, cmd: str) -> list[str]:
     return lines
 
 
+def _ps_exe() -> str:
+    """xp_cmdshell 里用这个启动 PowerShell 2～5。"""
+    return "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass"
+
+
 def _sql_write_text_file(dbc: Any, dest: str, text: str) -> None:
-    """把脚本写成 SQL Server 本机临时文件。只用 [IO.File]，兼容 PowerShell 2。"""
-    raw = (text or "").encode("utf-8")
+    """把脚本写成 SQL Server 本机临时文件。UTF-16 带 BOM，PowerShell 2 的 -File 才能读。"""
+    raw = (text or "").encode("utf-16")
     b64 = base64.b64encode(raw).decode("ascii")
     dest_ps = dest.replace("'", "''")
     b64_path = dest + ".b64"
     b64_ps = b64_path.replace("'", "''")
+    ps = _ps_exe()
     _sql_run(
         dbc,
-        "powershell.exe -NoProfile -NonInteractive -Command "
+        ps + " -Command "
         f"\"foreach($p in @('{dest_ps}','{b64_ps}')){{if([IO.File]::Exists($p)){{[IO.File]::Delete($p)}}}}\"",
     )
-    step = 1500
+    # xp_cmdshell 大约 8000 字；2008 上每次冷启动很慢，块尽量大
+    step = 3500
     for i in range(0, len(b64), step):
         piece = b64[i : i + step]
         if i == 0:
             cmd = f"[IO.File]::WriteAllText('{b64_ps}','{piece}')"
         else:
             cmd = f"[IO.File]::AppendAllText('{b64_ps}','{piece}')"
-        _sql_run(dbc, "powershell.exe -NoProfile -NonInteractive -Command \"" + cmd + "\"")
+        _sql_run(dbc, ps + " -Command \"" + cmd + "\"")
     out = _sql_run(
         dbc,
-        "powershell.exe -NoProfile -NonInteractive -Command "
+        ps + " -Command "
         f"\"$t=[IO.File]::ReadAllText('{b64_ps}');"
         f"[IO.File]::WriteAllBytes('{dest_ps}',[Convert]::FromBase64String($t));"
         f"[IO.File]::Delete('{b64_ps}');"
@@ -262,55 +279,83 @@ def _sql_write_text_file(dbc: Any, dest: str, text: str) -> None:
 
 
 def _upload_ps_script(syno: dict[str, Any], src: str, dest_dir: str, filename: str) -> str:
-    """SQL Server 本机执行：登录群晖后流式上传。只用不依赖 PowerShell 3 的 API。"""
+    """SQL 本机直传脚本：只用 PowerShell 2 / .NET 2 API，Windows 2008～2019 都能跑。"""
     scheme = "https" if syno.get("https") else "http"
     base = f"{scheme}://{syno['host']}:{int(syno['port'])}"
     return f"""
 $ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'
+if ($PSVersionTable -and [int]$PSVersionTable.PSVersion.Major -ge 3) {{ $ProgressPreference = 'SilentlyContinue' }}
 try {{ [Net.ServicePointManager]::ServerCertificateValidationCallback = {{ $true }} }} catch {{}}
 try {{ [Net.ServicePointManager]::Expect100Continue = $false }} catch {{}}
+try {{ [Net.WebRequest]::DefaultWebProxy = $null }} catch {{}}
+foreach ($p in @(4080, 3072, 192, 48)) {{
+  try {{ [Net.ServicePointManager]::SecurityProtocol = $p; break }} catch {{}}
+}}
+$noproxy = $null
+try {{ $noproxy = [Net.GlobalProxySelection]::GetEmptyWebProxy() }} catch {{}}
 $base = {_ps_lit(base)}
 $user = {_ps_lit(str(syno.get("username") or ""))}
 $pass = {_ps_lit(str(syno.get("password") or ""))}
 $src = {_ps_lit(src)}
 $dest = {_ps_lit(dest_dir.replace("\\\\", "/").rstrip("/"))}
 $fn = {_ps_lit(filename)}
-if (-not [IO.File]::Exists($src)) {{ throw ('文件不存在 ' + $src) }}
+if (-not [IO.File]::Exists($src)) {{ throw ('file not found ' + $src) }}
 Write-Output ('SQLBAK_PS=' + [string]$PSVersionTable.PSVersion)
 function Enc([string]$s) {{ return [Uri]::EscapeDataString($s) }}
+function HttpLogin([string]$loginUrl, [string]$form) {{
+  $wc = New-Object System.Net.WebClient
+  if ($noproxy) {{ $wc.Proxy = $noproxy }}
+  $wc.Headers.Add('Content-Type','application/x-www-form-urlencoded')
+  $bytes = [Text.Encoding]::UTF8.GetBytes($form)
+  $txt = [Text.Encoding]::UTF8.GetString($wc.UploadData($loginUrl, 'POST', $bytes))
+  $wc.Dispose()
+  return $txt
+}}
+$curlExe = ''
+try {{
+  $cmd = Get-Command curl.exe -ErrorAction SilentlyContinue
+  if ($cmd -ne $null) {{
+    $p = [string]$cmd.Path
+    if (-not $p) {{ $p = [string]$cmd.Definition }}
+    if ($p -like '*curl.exe') {{ $curlExe = $p }}
+  }}
+}} catch {{}}
+Write-Output ('SQLBAK_CURL=' + $curlExe)
 $sid = ''
 $tok = ''
-$curl = $null
-try {{ $curl = Get-Command curl.exe -ErrorAction SilentlyContinue }} catch {{}}
 $txt = ''
 foreach ($ver in @('7','6','3','2')) {{
   $loginUrl = $base + '/webapi/auth.cgi'
   $form = 'api=SYNO.API.Auth&version=' + $ver + '&method=login&account=' + (Enc $user) + '&passwd=' + (Enc $pass) + '&session=FileStation&format=sid&enable_syno_token=yes'
-  if ($curl) {{
-    $txt = & curl.exe -sS -k --connect-timeout 20 -X POST $loginUrl -d $form
-  }} else {{
-    $wc = New-Object System.Net.WebClient
-    $wc.Headers.Add('Content-Type','application/x-www-form-urlencoded')
-    $txt = [Text.Encoding]::UTF8.GetString($wc.UploadData($loginUrl, 'POST', [Text.Encoding]::UTF8.GetBytes($form)))
-    $wc.Dispose()
+  $txt = ''
+  if ($curlExe) {{
+    try {{ $txt = & $curlExe -sS -k --noproxy '*' --connect-timeout 20 -X POST $loginUrl -d $form }} catch {{ $txt = '' }}
   }}
+  if (-not $txt) {{ $txt = HttpLogin $loginUrl $form }}
   if ($txt -match '"sid"\\s*:\\s*"([^"]+)"') {{
     $sid = $Matches[1]
     if ($txt -match '"synotoken"\\s*:\\s*"([^"]+)"') {{ $tok = $Matches[1] }}
     break
   }}
 }}
-if (-not $sid) {{ throw ('群晖登录失败 ' + $txt) }}
+if (-not $sid) {{ throw ('synology login fail ' + $txt) }}
 $u = $base + '/webapi/entry.cgi?api=SYNO.FileStation.Upload&version=2&method=upload&_sid=' + $sid
 $out = ''
-if ($curl) {{
-  $cargs = @('-sS','-k','--connect-timeout','20','--max-time','28800','-X','POST',$u,
-    '-F',('path=' + $dest),'-F','create_parents=true','-F','overwrite=true',
-    '-F',('file=@' + $src + ';filename=' + $fn))
-  if ($tok) {{ $cargs += @('-H',('X-SYNO-TOKEN: ' + $tok)) }}
-  $out = & curl.exe @cargs
-}} else {{
+$usedCurl = $false
+if ($curlExe) {{
+  try {{
+    $cargs = @('-sS','-k','--noproxy','*','--connect-timeout','20','--max-time','28800','-X','POST',$u,
+      '-F',('path=' + $dest),'-F','create_parents=true','-F','overwrite=true',
+      '-F',('file=@' + $src + ';filename=' + $fn))
+    if ($tok) {{ $cargs += @('-H',('X-SYNO-TOKEN: ' + $tok)) }}
+    $out = & $curlExe @cargs
+    $usedCurl = $true
+  }} catch {{
+    $usedCurl = $false
+    $out = ''
+  }}
+}}
+if (-not $usedCurl) {{
   $boundary = '----sqlbak' + [guid]::NewGuid().ToString('N')
   $enc = [Text.Encoding]::UTF8
   $CRLF = [char]13 + [char]10
@@ -322,8 +367,9 @@ if ($curl) {{
   $fi = New-Object IO.FileInfo($src)
   $req = [Net.HttpWebRequest]::Create($u)
   $req.Method = 'POST'
+  if ($noproxy) {{ $req.Proxy = $noproxy }}
   $req.Timeout = 28800000
-  $req.ReadWriteTimeout = 28800000
+  try {{ $req.ReadWriteTimeout = 28800000 }} catch {{}}
   $req.AllowWriteStreamBuffering = $false
   $req.ContentType = 'multipart/form-data; boundary=' + $boundary
   $req.ContentLength = $pre.Length + $fi.Length + $post.Length
@@ -341,7 +387,7 @@ if ($curl) {{
     $sr = New-Object IO.StreamReader($resp.GetResponseStream())
     $out = $sr.ReadToEnd()
     $sr.Close(); $resp.Close()
-  }} catch [Net.WebException] {{
+  }} catch {{
     $ex = $_.Exception
     if ($ex.Response) {{
       $sr = New-Object IO.StreamReader($ex.Response.GetResponseStream())
@@ -395,12 +441,7 @@ def _upload_via_sql_direct(
             try:
                 _sql_write_text_file(dbc, ps1, script)
                 wrote = True
-                lines = _sql_run(
-                    dbc,
-                    "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \""
-                    + ps1
-                    + "\"",
-                )
+                lines = _sql_run(dbc, _ps_exe() + " -File \"" + ps1 + "\"")
             except Exception as write_err:  # noqa: BLE001
                 if wrote or len(encoded) >= 3500:
                     raise
@@ -470,8 +511,8 @@ def _write_chunked(dbc: Any, windows_path: str, dest: Path, size: int) -> None:
 def _sql_file_length(dbc: Any, windows_path: str) -> int:
     p = windows_path.replace("'", "''")
     cmd = (
-        "powershell.exe -NoProfile -NonInteractive -Command "
-        f"\"$ProgressPreference='SilentlyContinue';(Get-Item -LiteralPath '{p}').Length\""
+        _ps_exe() + " -Command "
+        f"\"(Get-Item -LiteralPath '{p}').Length\""
     )
     for line in xp_cmdshell_lines(dbc, cmd):
         text = line.strip()
@@ -483,9 +524,8 @@ def _sql_file_length(dbc: Any, windows_path: str) -> int:
 def _sql_read_chunk(dbc: Any, windows_path: str, offset: int, length: int) -> bytes:
     p = windows_path.replace("'", "''")
     cmd = (
-        "powershell.exe -NoProfile -NonInteractive -Command "
-        "\"$ProgressPreference='SilentlyContinue';"
-        f"$fs=[IO.File]::OpenRead('{p}');$fs.Position={int(offset)};"
+        _ps_exe() + " -Command "
+        f"\"$fs=[IO.File]::OpenRead('{p}');$fs.Position={int(offset)};"
         f"$b=New-Object byte[] {int(length)};$r=$fs.Read($b,0,{int(length)});$fs.Close();"
         "$s=[Convert]::ToBase64String($b,0,$r);"
         "for($i=0;$i -lt $s.Length;$i+=240){$s.Substring($i,[Math]::Min(240,$s.Length-$i))}\""
